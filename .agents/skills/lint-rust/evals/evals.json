@@ -1,0 +1,60 @@
+{
+  "skill_name": "lint-rust",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Run full lint suite on this Rust project",
+      "expected_output": "Runs clippy, fmt check, cargo audit, cargo deny, cargo machete in sequence",
+      "files": [],
+      "assertions": [
+        "Runs clippy with -D warnings",
+        "Runs cargo fmt --check",
+        "Runs cargo audit and cargo deny"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Fix all clippy warnings",
+      "expected_output": "Runs clippy with --fix flag, reports auto-fixed vs manual fixes needed",
+      "files": [],
+      "assertions": [
+        "Uses cargo clippy --fix --allow-dirty",
+        "Reports warnings that couldn't be auto-fixed",
+        "Runs --all-targets --all-features"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Check for security vulnerabilities in dependencies",
+      "expected_output": "Runs cargo audit and cargo deny check, reports findings with severity",
+      "files": [],
+      "assertions": [
+        "Runs cargo audit",
+        "Runs cargo deny check",
+        "Reports vulnerability severity and license issues"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Check if my code is properly formatted",
+      "expected_output": "Runs cargo fmt --check and reports unformatted files",
+      "files": [],
+      "assertions": [
+        "Runs cargo fmt --check",
+        "Reports which files need formatting",
+        "Does not modify files in check mode"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Lint the entire workspace for unused dependencies",
+      "expected_output": "Runs cargo machete to find unused dependencies across all crates",
+      "files": [],
+      "assertions": [
+        "Runs cargo machete",
+        "Reports unused dependencies per crate",
+        "Distinguishes between truly unused and build-only deps"
+      ]
+    }
+  ]
+}

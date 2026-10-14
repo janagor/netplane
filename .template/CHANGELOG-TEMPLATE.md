@@ -1,0 +1,533 @@
+# Changelog Template
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- for new features.
+
+### Changed
+
+- for changes in existing functionality.
+
+### Deprecated
+
+- for soon-to-be removed features.
+
+### Removed
+
+- for now removed features.
+
+### Fixed
+
+- for any bug fixes.
+
+### Security
+
+- in case of vulnerabilities.
+
+---
+
+## [0.3.10] - 2026-09-26
+
+### Added
+
+- `reviewing-pull-requests` skill: impact-based PR triage (blast radius over diff size), a `What NOT to Flag` false-positive list, draft-post separation with a human gate, and `references/gh-recipes.md` covering `gh` list/view/comment/close plus the permissions matrix.
+
+### Changed
+
+- Skill validation and skill evaluations now run on the `pull-request` and `protected-branch` tiers, with `when_changed` glob mappings so skill edits trigger them instead of surfacing only in the scheduled tier.
+- `structure_check.sh` scores nine real signals (spec-conformant `name`/`description`, body budget, evals) instead of awarding a point for a `## When to Use` heading that cannot influence triggering.
+
+### Removed
+
+- `.mimocode/` (3368 files, one tracked release command) and its stale exclusions in `quality_helpers.rs`; defensive ignore patterns in `.gitignore`, `.markdownlint-cli2.jsonc`, and `.gitleaks.toml` are retained for adopters who use the tool.
+- Duplicated 111-line `skill-evaluator/references/evaluating-skills.md`, replaced with a pointer to the canonical `skill-creator` copy.
+
+### Fixed
+
+- `validate-skills.sh` counted body lines by stopping at the first `---` after the frontmatter, so horizontal rules inside a body truncated the count (e.g. `anti-ai-slop` reported 12 of 118). Body budget checks across the skill system were effectively inert.
+- `dora-report` silently returned default policy when a DORA policy file was malformed, producing wrong metrics with no signal; the error now reports to stderr with the failing path.
+- `xtask template_init` documented transactional apply semantics that the code does not provide; the doc now states that each write is atomic but a later I/O failure can leave earlier changes in place. `plan_rename` and `prose_rewrites` no longer touch crates and files that the same plan removes.
+- `harness` and `secret-lint` evals had no negative cases; each gained a validation case testing refusal rather than happy-path compliance.
+
+---
+
+## [0.3.9] - 2026-09-24
+
+### Added
+
+- Fail-closed when-changed selection & explain subcommand (`xtask quality explain`): added declarative path-to-check glob mapping in `config/xtask.json` and `XtaskConfig` (`when_changed`), enabling granular check selection with `xtask quality explain` and fail-closed selection on unreadable git state (PR #388, Issue #365).
+- `scripts/distill-strikes.sh`: clusters repeated sensor failure signatures from `.agents/ci/regression-matrix.json` and recent telemetry history, automatically scaffolding draft starter skills and red fixtures when strikes reach threshold without overwriting existing skills (PR #386, Issue #374).
+- Release provenance regression fixtures: added offline ELF/Mach-O/PE binary verification test in `tests/release_provenance_test.sh` and documented fixtures under `tests/fixtures/release_provenance/` to guard against regressions in `cargo-auditable` binary embedding (PR #387, Issues #381, #377).
+- Release CycloneDX SBOM generation: enabled `cargo-cyclonedx = true` in `dist-workspace.toml` and automated installation via `taiki-e/install-action` in `.github/workflows/release.yml` (PR #389, Issue #380).
+- GitHub artifact attestations for release binaries: integrated `actions/attest-build-provenance` into `.github/workflows/release.yml` with `gh attestation verify` verification documented in `release-rust` skill (PR #393, Issue #379).
+- Release preflight gate: added dedicated `preflight` job in `.github/workflows/release.yml` verifying that tag strictly matches `v$(cat VERSION)`, asserting manifest consistency via `scripts/propagate-version.sh --check`, and failing fast if the release tag already exists on GitHub (PR #392, Issues #391, #369).
+- `scripts/doctor.sh` strict mode: added `--strict` flag to fail closed (exit code 1) on missing managed git hooks, broken skill symlinks, uncommitted changes, or shadowed `core.hooksPath` (Issue #373).
+- Deterministic DORA snapshot derivation manifest: added deterministic calculation, policy file `plans/dora.json`, and SHA-256 derivation manifest generation in `dora-report` (PR #384).
+- Evidence freshness fingerprinting: added worktree, head commit, and policy file hashing to `crates/xtask` telemetry and `xtask quality status` subcommand (PR #375).
+
+### Changed
+
+- Upgraded cargo-dist from 0.27.0 to 0.32.0 across template configuration (`dist-workspace.toml` and release workflow) with multi-stage plan/host architecture (PR #383).
+- Profile-specific lockfile policies: template initialization for binary profiles (`cli`, `service`, `ai-agent`) tracks and commits `Cargo.lock` by default for reproducible application builds while library profiles preserve lockfile ignore rules (PR #385, Issue #382).
+- Dynamic telemetry contract verification: `tests/ci_telemetry/telemetry_integration_test.sh` dynamically derives the target tier from the generated artifact when `--use-existing` is supplied, fixing `EvidenceStatus::Stale` tier mismatches in protected-branch CI.
+- Architecture diagram workflow resilience: `.github/workflows/update-architecture-diagram.yml` automatically falls back to PR creation (`docs/update-overview-diagram`) when direct pushes to protected `main` are declined by repository rules.
+- MSRV workspace inheritance: `benchmarks/Cargo.toml` and `examples/hello_world/Cargo.toml` now inherit `version.workspace = true`, `edition.workspace = true`, and `rust-version.workspace = true`.
+- License allowance linting: configured `unused-allowed-license = "allow"` in `deny.toml` to suppress benign unmatched license warnings in starter template.
+
+### Removed
+
+- Removed duplicate and conflicting `.github/workflows/release-drafter.yml` and `.github/release-drafter.yml`, standardizing on `git-cliff` as the canonical single source of truth for release notes (PR #392, Issue #390).
+
+### Fixed
+
+- Fixed `crates/xtask/src/telemetry.rs` markdown summary table formatting to ensure strict `markdownlint-cli2` compliance.
+- Fixed `scripts/audit-msrv.sh` member discovery to filter for directories containing `Cargo.toml`, preventing false warnings on standalone example files (`examples/roast-scorer.rs`).
+- Fixed yamllint comment spacing and document start headers in test fixture workflows and `.github/workflows/test-init-template.yml`.
+- Fixed line-length and job output block placement in `.github/workflows/release.yml`.
+- Formatted `crates/xtask/src/template_profile_test.rs` to satisfy `cargo fmt`.
+- Added missing `Rationalizations`, `Red Flags`, and `evals/evals.json` across `harness`, `secret-lint`, and `tokio-performance` skills to pass skill authoring compliance.
+
+### Security
+
+- Prevented TOCTOU race condition in config loading (`e4f4927`, PR #363).
+- Added SWAR fast-path byte scan for tool validation in `mcp-server` (`dc29777`, PR #358).
+---
+
+## [0.3.8] - 2026-09-18
+
+### Added
+
+- `scripts/check-template-version.sh`: fails when the README version badge disagrees with the newest release in `.template/CHANGELOG-TEMPLATE.md`; wired into the `VERSION consistency check` job.
+- `scripts/update-bench-history.sh`: aggregates `benchmarks/events/**/*.jsonl` into `benchmarks/history.jsonl`, preserving rows across event retention pruning.
+
+### Changed
+
+- Benchmarks job records a trend: history aggregation after parsing, plus an informational comparison against the newest event-bearing run, written to both the step log and summary.
+- Shell suites under `tests/` now run in CI: the llms context generator suite in `Validate Agent Entrypoints`, and the regression-matrix and telemetry-contract suites in `Quality Gate`.
+- `tests/ci_telemetry/telemetry_integration_test.sh` gained `--use-existing`, so the quality-gate job validates its own artifacts instead of re-running the tier.
+
+### Fixed
+
+- `scripts/compare-benchmarks.sh`: reads the `ns_per_iter` field the event format writes (was `nanoseconds`, so every comparison silently reported nothing), parses `--commit-a`/`--commit-b` correctly, reports incomparable runs instead of "no significant changes", and is informational only — no machine-dependent timing gate.
+- `tests/generate_llms_txt_test.sh`: rebuilt its fixture as a fake repository with the generator under `scripts/`, and asserts the VERSION header instead of the timestamp removed in `a991c6b`; two shellcheck warnings fixed.
+- Removed `tests/quality_gate_test.sh`, which only re-ran the quality gate the job already executes.
+- README version badge, "Latest release" line and generated `llms-full.txt` realigned with the changelog.
+
+---
+
+## [0.3.7] - 2026-09-17
+
+### Added
+
+- Tokio runtime regression harness: `benchmarks/benches/tokio_runtime_bench.rs` and `benchmarks/benches/tokio_runtime_pressure_bench.rs` report `p50/p95/p99/max` telemetry for execution strategy, fairness, fan-out, registry contention and service queues.
+- `benchmarks/tests/tokio_runtime_behavior.rs`: deterministic runtime invariants for bounded-queue backpressure, scheduler starvation and its yield cure, `spawn_blocking` isolation, permit bounds and registry updates.
+- `tests/parse_bench_test.sh`: benchmark event parser regression suite, wired into the `Benchmarks` job.
+- Historical CI regression matrix in `.agents/ci/regression-matrix.json` with `schema/ci-regression-matrix.schema.json` and signature tests.
+- `benchmarks/README.md`: how to run the harness, read its tails, and adapt it in derived projects.
+
+### Changed
+
+- `crates/mcp-server-template`: tool dispatch uses a copy-on-write snapshot registry (`std::sync::RwLock<Arc<ToolRegistry>>`), so no lock is held across `.await`.
+- Security scanning is owned by `security-scan.yml` as the single source of truth, with per-control failure classification, structured artifacts and regression fixtures.
+- `scripts/parse_bench.py` merges harness percentile rows with criterion's `target/criterion/**/new/estimates.json` medians.
+- Benchmarks job runs `cargo bench --workspace`, so bench targets of any kind in any member are recorded for derived projects.
+- `tokio-performance` skill: workload-aware execution-model guidance, with the regression harness as the preferred evidence source.
+- Release guidance documents topological workspace publishing and `--allow-dirty` for local package checks.
+
+### Fixed
+
+- `cargo clippy` sensor parity: `.githooks/pre-commit`, skills and `scripts/roast-scorer.sh` run `--workspace`, matching CI.
+- `Cargo.toml`: `/src` restored to `[workspace.package].include` so inherited package includes cannot produce a sourceless crate.
+- Benchmarks job records telemetry again; it previously wrote 0-byte event files while reporting success.
+- Generated quality summaries are markdownlint-clean (`MD009`, `MD058`), so repeated quality runs no longer fail on their own artifacts.
+- DORA report generation handles paginated API output and missing report directories.
+- Architecture diagram workflow retries safely against concurrent `main` updates.
+
+### Security
+
+- `cargo deny` uses the global `--format json` position; the secret-scan exclusion is narrowed to the deliberate fixture file.
+- Least-privilege permissions in the DORA and hotfix workflows.
+
+---
+
+## [0.3.6] - 2026-08-20
+
+### Added
+
+- `stacked-prs` skill for optional stacked PR workflow via `gh-stack` GitHub CLI extension.
+- `gh-stack` optional workflow tool checks in `scripts/doctor.sh` and `scripts/bootstrap.sh`.
+- Optional `stack_id`, `stack_position`, and `stack_total` fields in `metrics-reporter` event schema for stacked PR tracking.
+- `gh run watch` gate in `hotfix.yml` workflow to block DORA FDRT recovery recording until CI is green on hotfix branch.
+- Config-driven CI verification tiers (`pull-request`, `protected-branch`, `scheduled`, `release`) in `config/xtask.json`.
+- Project initialization template profiles in `config/template-profiles/` with schema validation and CI telemetry contract.
+- Adapter manifest validation for multi-agent support and `gh` CLI replacements for GitHub script actions.
+- Dedicated `workspace-tests` crate for workspace integration and architecture fitness tests.
+
+### Changed
+
+- `AGENTS.md`: added "Stacked PRs (Optional)" section pointing to `stacked-prs` skill.
+- `atomic-commit` skill: added cross-reference to `stacked-prs` for large features with 3+ concerns.
+- `self-fix-loop` skill: added "Stacked PR Interaction" section documenting safe fix procedures on stacked branches (never amend, use `gh stack push`).
+- `scripts/doctor.sh`: added "Optional workflow tools" section checking for `gh` CLI and `gh-stack` extension.
+- `scripts/bootstrap.sh`: added informational check for `gh` CLI and `gh-stack` presence.
+- Quality-gate orchestration moved into Rust-based `xtask` binary tool.
+- Upgraded dependencies: `rusqlite` to 0.40, `toml` to 1.1, `Swatinem/rust-cache` action, `taiki-e/install-action`, `actions/checkout` to 4.4.0, and `js-yaml`.
+- Replaced deprecated `criterion::black_box` with `std::hint::black_box` in benchmarks.
+- `README.md` version reference updated to point to `v0.3.6`.
+
+### Fixed
+
+- Input sanitization and validation for MCP tool names in `mcp-server-template`.
+- Command identifier validation in plugin dispatch registry (`example-registry-pattern`).
+- Unused dependencies removed from `Cargo.toml` manifests to pass `cargo-machete` quality gates.
+- Resolved `arch_fitness` test package resolution in virtual workspace.
+
+### Security
+
+- Log payload sanitization and truncation in `actor-runtime-template` to prevent CWE-117 log injection and DoS.
+- SWAR (SIMD Within A Register) fast-path string validation for control character and Bidi filtering.
+
+---
+
+## [0.3.5] - 2026-07-20
+
+### Changed
+
+- `scripts/roast-scorer.sh`: package name now derived dynamically from `Cargo.toml` instead of hardcoded; `init-template.sh` rewrites it on init.
+- `README.md` version reference updated to point to `v0.3.5`.
+
+### Fixed
+
+- `scripts/roast-scorer.sh`: `check_architecture` now passes the correct `--package` flag using the dynamic package name, fixing the false 5/10 architecture score.
+- GitHub Actions dependencies updated in CI workflows: `davidanson/markdownlint-cli2-action` to `24.1.0`, `taiki-e/install-action` to `2.83.4`, `EmbarkStudios/cargo-deny-action` to `2.1.1`, `cargo-bins/cargo-binstall` to `1.21.0`, and `softprops/action-gh-release` to `3.0.2` (PR #271).
+
+---
+
+## [0.3.4] - 2026-07-07
+
+### Added
+
+- `CARGO_INCREMENTAL=0` in CI to reduce I/O overhead (PR #243).
+- `docs/src/faster-builds.md` — comprehensive platform-specific build optimization guide (PR #242).
+
+### Changed
+
+- `[profile.fast-dev]` now combines `debug=0`, `strip="debuginfo"`, and `panic="abort"` for maximum local iteration speed.
+- `README.md` version reference updated to point to `v0.3.4`.
+
+### Fixed
+
+- `crossbeam-epoch` updated from 0.9.18 to 0.9.20 (RUSTSEC-2026-0204).
+- `checkpoint-template/src/lib.rs` reduced from 504 to 497 LOC (under 500 limit).
+- `cargo-machete` false positives suppressed for optional/feature-gated dependencies (`rusqlite` in `example-storage-pattern`, `rust-2026-template` in `fuzz`).
+
+---
+
+## [0.3.3] - 2026-07-01
+
+### Added
+
+- for new features.
+
+### Changed
+
+- `CHANGELOG.md` reset to a clean skeleton (placeholder text only); all
+  template-specific changelog entries now live exclusively in this file
+  (`.template/CHANGELOG-TEMPLATE.md`). The `VERSION` file stays at `0.0.0`
+  as the derived-project starter value.
+- `scripts/bump-version.sh`: aligned the `[Unreleased]` skeleton block to
+  the full 6-section Keep-a-Changelog format (Added/Changed/Deprecated/
+  Removed/Fixed/Security) matching `CHANGELOG.md`; switched from literal
+  `\n` to `printf` for BSD/macOS sed compatibility; changed the new-version
+  diff link to `/compare/` format (Keep-a-Changelog standard) instead of
+  `/releases/tag/`; replaced the hardcoded `d-oit/rust-2026-template` URL
+  with a `your-org/your-repo` placeholder for derived-project genericness;
+  fixed duplicate step numbers in the header comment.
+- `scripts/init-template.sh`: added `release.toml`, `scripts/bump-version.sh`,
+  and `CHANGELOG.md` to the list of files whose placeholder URLs get
+  rewritten during template initialization.
+- `setup-rust` composite action now exposes a `cache-on-failure` input
+  (default `true`); the Clippy job in CI overrides it to `false` so a
+  failed run cannot re-upload poisoned `.fingerprint/` metadata to the
+  rust-cache. Other jobs (Format, Test, Security, deny, Benchmarks, MSRV,
+  Version-check) keep the safe `true` default.
+- `examples/roast-scorer.rs` uses `Result<(), Box<dyn std::error::Error>>`-
+  returning `main` with `?`-propagation (no `.expect()` calls) and
+  `#![allow(missing_docs)]` so the example compiles under
+  `cargo clippy --all-targets -- -D warnings` (which enforces
+  `clippy::expect_used` and `missing_docs`). Behaviour for callers
+  invoking `cargo run --example roast-scorer` is unchanged.
+- `hybrid-storage-template`: the `redb` KV backend is now opt-in via
+  `--features kv` (it was previously always compiled because `redb` was a
+  non-optional dependency). To restore prior compile parity, add `kv`
+  to your default features in `Cargo.toml`. The `sqlite` feature
+  (`libsql` backend) remains on by default.
+- `hybrid-storage-template`: dropped unused direct dependencies
+  `serde`, `serde_json`, and `tracing` from the manifest.
+
+### Deprecated
+
+- for soon-to-be removed features.
+
+### Removed
+
+- `[workspace.dependencies].rmcp` — the `rmcp` MCP framework was not used
+  in any in-tree code path (only in a documentation banner comment). The
+  `crates/mcp-server-template` crate itself remains and now uses raw
+  `tokio`/`serde` for its server implementation.
+- `fuzz/Cargo.toml`: dropped the unused `rust-2026-template = { path = ".." }`
+  dependency; the fuzz targets only sample the workspace's `sample-app`.
+- No-op `mcp` feature flag removed from root `Cargo.toml` — it had no
+  `#[cfg(feature = "mcp")]` in any source file and only aliased `cli`.
+  Stale `rmcp` references cleaned from `Cargo.toml` comments,
+  `mcp-server-template/src/lib.rs` doc diagram, `README.md`, and
+  `docs/src/getting-started.md` feature tables.
+- Stale `RUSTSEC-2024-0436` advisory ignore removed from `deny.toml`
+  (`paste` is no longer a transitive dependency after `rmcp` removal).
+
+### Fixed
+
+- `docs/src/architecture.md`: corrected crate name `hello-world-example` →
+  `hello_world` to match the actual directory name.
+
+### Security
+
+- in case of vulnerabilities.
+
+---
+
+## [0.3.2] - 2026-06-17
+
+### Added
+
+- `/update-template-changelog` custom command for automated changelog updates from git history.
+
+---
+
+## [0.3.1] - 2026-06-17
+
+### Added
+
+- `verify-actions` skill with evals for CI action SHA verification.
+- Pre-commit hook with line count check (max 500 LOC) and cargo env sourcing.
+- `swatinem/rust-cache` and concurrency control to `fuzz.yml` and `release.yml`.
+
+### Changed
+
+- Unified `actions/checkout` to v6 and `upload-artifact` to v7 across all workflows.
+- Extracted `sample-app` tests to `src/tests.rs` to pass LOC gate.
+
+### Fixed
+
+- Documentation corrections: dora-metrics workflow ref, context.yaml placeholders, ci.md tiers.
+- README version badge, crate list, feature defaults, and benchmarks updated.
+- Replaced `temp_dir` with current directory in test to satisfy Codacy.
+
+---
+
+## [0.3.0] - 2026-06-17
+
+### Added
+
+- `issue-triage` skill for reading open issues (GitHub/GitLab), categorizing by type and effort, and coordinating batch implementation.
+- GitLab support to `atomic-commit` and `self-fix-loop` skills.
+- GitLab platform auto-detection in `issue-triage` skill.
+- Folder symlinks for `.claude/skills/` and `.qwen/skills/` for multi-CLI agent support.
+- Cross-repo agent context via `.agents/context/` with `external-repos.json` and `shared-conventions.md`.
+
+### Fixed
+
+- `MIGRATION.md` version references corrected.
+- Removed unused `async-trait` dependency.
+- Moved `CHANGELOG-TEMPLATE` to `.template/` directory.
+- Poisoned mutex handling in `MockBackend` for MCP security hardening.
+- Clippy `significant-drop-tightening` warning resolved.
+- Markdown lint issues and missing skill references resolved.
+
+---
+
+## [0.2.3] - 2026-06-08
+
+### Added
+
+- `scripts/generate-skills-md.sh` to auto-generate SKILLS.md from skill frontmatter.
+- Auto-generated `.agents/SKILLS.md` with skill index table.
+
+---
+
+## [0.2.2] - 2026-06-02
+
+### Added
+
+- `.gitignore` guardrail rules to block root dummy/test/data files.
+- `schema/` directory for JSON Schema definitions with reference example.
+- `config/profiles/` pattern for profile-based runtime configuration.
+- Upgraded `.codacy.yml` to full `.codacy/` directory for richer tool configuration.
+- `reports/` directory convention for generated HTML review and analysis output.
+- Workspace layering convention (documented in `docs/architecture.md` and `Cargo.toml`).
+- `example-storage-pattern` crate demonstrating trait-only storage layer.
+- `example-registry-pattern` crate demonstrating extensible handler dispatch.
+- Automated documentation toolchain using `cargo-sync-readme` and `cargo-doc2readme`.
+- `Makefile` with `docs`, `docs-check`, and `ci` targets.
+- `docs-check.yml` CI workflow for automated documentation enforcement.
+
+### Changed
+
+- `README.md` now automatically synced from `src/lib.rs` crate-level documentation.
+
+---
+
+## [0.2.1] - 2026-05-31
+
+### Added
+
+- `validate-agents` CI job with entrypoint validation script.
+- `agent-doc-flow.md` documentation for assistant entrypoint model.
+- ADR 0002: CI optimization and agent validation.
+
+### Changed
+
+- Rust toolchain bumped from 1.87 to 1.88.
+- CI jobs gated on file changes via `dorny/paths-filter`.
+- CI status handling for skipped jobs via `netlify/ci-status`.
+- `rmcp` dependency bumped from 0.3.2 to 1.7.0.
+- `criterion` dependency bumped from 0.5.1 to 0.8.2.
+- `actions/checkout` bumped from 4.3.1 to 6.0.2.
+- `actions/setup-python` bumped from 5.6.0 to 6.2.0.
+- `gitleaks/gitleaks-action` bumped from v2 to v3.
+- `peter-evans/create-pull-request` bumped from 6.1.0 to 8.1.1.
+- `fuzz.yml` and `mutants.yml` updated for path-gated triggers.
+- `CHANGELOG.md` reset to clean template skeleton.
+
+### Fixed
+
+- Clippy `uninlined-format-args` lint under rustc 1.88.
+- Documentation badges and MSRV references updated across all docs.
+
+---
+
+## [0.2.0] - 2026-05-29
+
+### Added
+
+- `VERSION` file at repo root as plain-text single source of truth for cross-tooling scripts and CI.
+- `llms-full.txt` with complete source context for AI assistants (auto-generated from key docs).
+- `scripts/generate-llms-txt.sh` to regenerate `llms.txt` and `llms-full.txt` after architectural changes.
+- `benchmarks/` workspace crate with `end_to_end` and `memory_usage` Criterion benchmark suites.
+- `fuzz/` scaffold with `cargo-fuzz` targets and weekly fuzz CI workflow (`.github/workflows/fuzz.yml`).
+- Composable feature flags: `cli`, `persistence`, `parallel`, `wasm` with opt-in heavy dependencies.
+- `[package]` section in root `Cargo.toml` with `include` manifest for crates.io publishing.
+- CI jobs: benchmarks compile-check, VERSION consistency check, LLM context staleness check.
+
+### Changed
+
+- Workspace resolver upgraded from v2 to v3 (Rust 2024 edition default).
+- Release profile: `lto = "fat"` (was `thin`), `panic = "unwind"` documented, `strip = "symbols"`.
+- Clippy lints: ADR-driven phased strategy with promoted pedantic/nursery lints at warn.
+- Redundant `#![forbid(unsafe_code)]` / `#![warn(clippy::pedantic)]` removed from source; enforced via `Cargo.toml` `[lints]`.
+- Version bumped from 0.1.2 to 0.2.0.
+
+### Fixed
+
+- Removed unstable `wrap_comments = true` from `rustfmt.toml` (nightly-only).
+- Stale `include` paths (`/benches`) and `exclude_re` (`^src/generated/`) in `Cargo.toml`.
+- Unused `anyhow` and `insta` deps removed from `sample-app`.
+- Unquoted `$EXCLUDE_DIR` in `scripts/quality-gates.sh` (ShellCheck).
+- `MPL-2.0` added to `deny.toml` allowed licenses for `colored` optional dependency.
+
+---
+
+## [0.1.2] - 2026-05-19
+
+### Added
+
+- Codecov configuration for coverage gate enforcement.
+- `cargo-dist` and `release.toml` for automated release engineering.
+- `llms.txt` and `llms-full.txt` as standard LLM context files.
+- `.test-quality.toml` for test quality enforcement (Step 10 in quality gates).
+- `.shellcheckrc` and shell script quality gate integrated into pre-commit and CI.
+- Enhanced `scripts/quality-gates.sh` with test quality and coverage checks.
+
+### Fixed
+
+- Empty link in `README.md` version badge causing markdownlint (MD042) failure.
+
+---
+
+## [0.1.1] - 2026-05-16
+
+### Added
+
+- `sample-app` binary crate: tokio, clap, serde/serde_json, tracing, thiserror, anyhow
+  - CLI flags: `--count`, `--verbose`, `--config`
+  - JSON config loading with 1 MB size guard and `#[serde(deny_unknown_fields)]`
+  - Typed `AppError` enum via `thiserror`
+- `scripts/release-manager.sh`: dry-run release workflow (validate / prepare / publish)
+- `scripts/code-quality.sh`: fmt | clippy | audit | check | fix operations
+- Cargo aliases in `.cargo/config.toml`: `check-all`, `test-all`, `fmt-check`, `lint`, `audit-check`, `release-check`
+- 9-step `scripts/quality-gates.sh` with `--fix` flag (adds unused-deps, privacy, and secret scans)
+- 9 agent skills: `anti-ai-slop`, `build-rust`, `crates-io-name-check`, `lint-rust`, `privacy-first`, `release-rust`, `skill-creator`, `skill-evaluator`, `test-rust`
+- `docs/architecture/context.yaml` for AI agent context
+- `plans/GOAP_STATE.md` for AI agent world state tracking
+- GitHub issue templates: `bug_report.yml`, `feature_request.yml`
+
+### Changed
+
+- Toolchain bumped from 1.85 to 1.87 (`rust-toolchain.toml` and `Cargo.toml` `rust-version`)
+- `tokio` features narrowed from `"full"` to `rt-multi-thread, macros, sync, time, fs`
+- `serde` pinned to `=1.0.194`, `serde_json` to `=1.0.143`, `insta` to `=1.47.2`
+- CI: sccache disabled for `cargo-deny` job (runs in Docker without sccache)
+- CI: mold linker installed for `clippy`, `test`, and `msrv` jobs
+
+### Fixed
+
+- Missing doc comments on `AppError` enum variants
+- CLI short flag conflict (`-c` for `--count`)
+- Clippy warnings: `single_match_else`, `uninlined_format_args`, `needless_borrows_for_generic_args`
+- `Unicode-3.0` added to allowed licenses in `deny.toml`
+- Potential DoS vector in JSON parsing by enforcing recursion limits.
+- Log injection vulnerability by filtering Unicode Bidirectional (Bidi) control characters.
+
+---
+
+## [0.1.0] - 2025-01-01
+
+### Added
+
+- Initial release from rust-2026-template
+- Cargo workspace structure
+- CI/CD with GitHub Actions (fmt, clippy, nextest, audit, deny)
+- Release workflow with cargo-dist
+- Agent guidelines (AGENTS.md, CLAUDE.md, GEMINI.md)
+- Agent skills (.agents/skills/)
+- Supply chain security (deny.toml, cargo-audit)
+- WSL2 optimizations (.cargo/config.toml, .vscode/settings.json)
+- Rust 2024 edition formatting (rustfmt.toml)
+- Clippy configuration (.clippy.toml)
+
+[Unreleased]: https://github.com/d-oit/rust-2026-template/compare/v0.3.10...HEAD
+[0.3.10]: https://github.com/d-oit/rust-2026-template/compare/v0.3.9...v0.3.10
+[0.3.9]: https://github.com/d-oit/rust-2026-template/compare/v0.3.8...v0.3.9
+[0.3.8]: https://github.com/d-oit/rust-2026-template/commit/b0755ce
+[0.3.7]: https://github.com/d-oit/rust-2026-template/commit/12667b4
+[0.3.6]: https://github.com/d-oit/rust-2026-template/commit/fc23fba
+[0.3.5]: https://github.com/d-oit/rust-2026-template/commit/634e458
+[0.3.4]: https://github.com/d-oit/rust-2026-template/commit/35d1265
+[0.3.3]: https://github.com/d-oit/rust-2026-template/commit/3e7d57e
+[0.3.2]: https://github.com/d-oit/rust-2026-template/commit/75a784e
+[0.3.1]: https://github.com/d-oit/rust-2026-template/commit/75a784e
+[0.3.0]: https://github.com/d-oit/rust-2026-template/commit/8247b62
+[0.2.3]: https://github.com/d-oit/rust-2026-template/commit/b5dee00
+[0.2.2]: https://github.com/d-oit/rust-2026-template/commit/621fe3c
+[0.2.1]: https://github.com/d-oit/rust-2026-template/commit/af0b971
+[0.2.0]: https://github.com/d-oit/rust-2026-template/commit/ea9aeaf
+[0.1.2]: https://github.com/d-oit/rust-2026-template/commit/2a5cdb8
+[0.1.1]: https://github.com/d-oit/rust-2026-template/commit/3ef4a88
+[0.1.0]: https://github.com/d-oit/rust-2026-template/commit/0f2b45a

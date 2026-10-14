@@ -1,0 +1,35 @@
+{
+  "skill_name": "issue-triage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Read all open issues from the current repository",
+      "expected_output": "Detects platform, calls gh issue list, returns structured list",
+      "assertions": [
+        "Detects platform from git remote",
+        "Calls gh issue list (GitHub) or glab issue list (GitLab)",
+        "Returns issue numbers and titles"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Triage these issues: #100 (feature), #101 (docs), #102 (bug)",
+      "expected_output": "Groups issues into categories with effort estimates",
+      "assertions": [
+        "Identifies issue types from labels or content",
+        "Estimates effort level",
+        "Groups compatible issues together"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Plan implementation for issues #155-#184",
+      "expected_output": "Creates ordered implementation plan with dependencies resolved",
+      "assertions": [
+        "Respects dependency order",
+        "Groups compatible issues",
+        "Provides checklist format"
+      ]
+    }
+  ]
+}

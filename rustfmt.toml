@@ -1,0 +1,17 @@
+# rustfmt.toml - Rust formatting configuration
+# https://rust-lang.github.io/rustfmt/
+
+edition = "2024"
+
+# Line length (default 100 is good for modern displays)
+max_width = 100
+
+# Formatting style
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# Comments
+# Removed: wrap_comments = true — unstable option
+
+# Misc
+newline_style = "Unix"

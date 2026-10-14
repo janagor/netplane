@@ -1,0 +1,54 @@
+---
+# Repository LLM Context Template
+# This file provides structured context for LLM APIs to understand the codebase
+# Format: YAML (machine-optimized, minimal markup)
+
+metadata:
+  project_name: "rust-2026-template"
+  description: >-
+    A production-ready Rust workspace template with modern tooling,
+    CI/CD, and AI agent integration
+  format_version: "1.0"
+  last_updated: 2026-06-17
+
+mission:
+  statement: >-
+    Provide a production-ready Rust workspace template with best
+    practices, CI/CD, and AI agent support baked in
+  scope:
+    - Workspace template with composable feature flags
+    - CI/CD pipeline with tiered quality gates
+    - AI agent skills and canonical instruction sets
+
+constraints:
+  hard:
+    - name: max_loc_per_file
+      value: 500
+      unit: lines
+      description: Source files must not exceed 500 lines of code
+    - name: async_runtime
+      value: "tokio"
+      pattern: "async/await"
+      description: Use Tokio async/await for all I/O operations
+    - name: zero_warnings
+      value: true
+      description: Clippy warnings are blockers
+
+stack:
+  language: "Rust"
+  edition: "2024"
+  major_deps:
+    - tokio
+    - thiserror
+    - anyhow
+    - tracing
+    - serde
+    - clap
+
+conventions:
+  error_handling: "Propagate errors with thiserror/anyhow. No unwrap() in library code."
+  testing: "AAA pattern. Unit tests in source files, integration tests in tests/."
+  async: >-
+    Workload-driven execution: direct execution for short CPU work,
+    spawn_blocking or pools for blocking/long CPU work,
+    bounded concurrency, minimal lock scopes.

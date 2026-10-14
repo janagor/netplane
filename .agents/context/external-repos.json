@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "description": "Cross-repo context for AI agents working in this repository",
+  "last_verified": "2026-06-16",
+  "related_repos": [
+    {
+      "name": "rust-2026-template",
+      "url": "https://github.com/d-oit/rust-2026-template",
+      "relationship": "parent-template",
+      "agent_context_url": "https://raw.githubusercontent.com/d-oit/rust-2026-template/main/AGENTS.md",
+      "llms_txt_url": "https://raw.githubusercontent.com/d-oit/rust-2026-template/main/llms.txt",
+      "description": "Source template for this repository. Agents should check here for skill updates.",
+      "pinned_ref": "main",
+      "last_verified": "2026-06-16",
+      "trust_level": "high"
+    },
+    {
+      "name": "github-template-ai-agents",
+      "url": "https://github.com/d-o-hub/github-template-ai-agents",
+      "relationship": "peer-template",
+      "agent_context_url": "https://raw.githubusercontent.com/d-o-hub/github-template-ai-agents/main/AGENTS.md",
+      "description": "Language-agnostic AI agent template. Provides general skills and multi-agent patterns. Refer to for non-Rust projects or general agent workflows.",
+      "pinned_ref": "main",
+      "last_verified": "2026-06-17",
+      "trust_level": "medium"
+    }
+  ],
+  "shared_skills": [
+    {
+      "skill": "build-rust",
+      "canonical_source": "d-oit/rust-2026-template/.agents/skills/build-rust/",
+      "override_local": false
+    },
+    {
+      "skill": "lint-rust",
+      "canonical_source": "d-oit/rust-2026-template/.agents/skills/lint-rust/",
+      "override_local": false
+    },
+    {
+      "skill": "test-rust",
+      "canonical_source": "d-oit/rust-2026-template/.agents/skills/test-rust/",
+      "override_local": false
+    }
+  ]
+}

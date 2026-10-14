@@ -1,0 +1,170 @@
+[workspace]
+members = ["crates/*", "examples/*", "benchmarks"]
+default-members = ["crates/sample-app"]
+resolver = "3"
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+# TODO: Replace these with your actual project metadata
+authors = ["Your Name"]
+repository = "https://github.com/your-org/your-repo"
+homepage = "https://github.com/your-org/your-repo"
+documentation = "https://docs.rs/your-crate"
+readme = "README.md"
+include = [
+    "/src",
+    "/examples",
+    "/tests",
+    "/benchmarks",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "NOTICE",
+    "VERSION",
+]
+
+# Virtual workspace — no root [package].
+# All real code lives in crates/ member crates.
+# See crates/README.md for the layering model.
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Enable all clippy lints at warning level
+all = { level = "warn", priority = -1 }
+
+# Pedantic/nursery set to warn by default
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# ── Agent-safety: prevent silencing lints instead of fixing code ──────────────
+# allow_attributes = "deny" blocks any #[allow(clippy::...)] annotation from
+# being introduced by AI agents or contributors. Fixes must be real, not silenced.
+allow_attributes = "deny"
+
+# Correctness: warn on panic-inducing patterns in library code
+# Library targets must use proper error handling (deny), tests/examples may allow.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "warn"
+
+# Promoted pedantic lints for correctness
+float_cmp = "warn"
+significant_drop_tightening = "warn"
+cast_precision_loss = "warn"
+cast_possible_truncation = "warn"
+redundant_clone = "warn"
+map_unwrap_or = "warn"
+unnecessary_map_or = "warn"
+missing_const_for_fn = "warn"
+
+# Promotion of high-value pedantic lints requested by maintainer
+missing_errors_doc = "warn"
+must_use_candidate = "warn"
+
+# Common justified allows
+too_many_arguments = "allow"
+type_complexity = "allow"
+cognitive_complexity = "allow"
+
+# ─── Workspace crate layering ────────────────────────────────────────────────
+# Dependencies flow strictly left-to-right (upward only):
+#
+#   *-types / *-domain
+#       └─→  *-core / *-logic
+#                └─→  *-adapters / *-backends
+#                         └─→  *-cli / *-bin
+#
+# No crate may depend on a crate to its right in this chain.
+# Violations are caught by `cargo deny` (see deny.toml).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─── Workspace-wide dependency versions ───────────────────────────────────────
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tokio-util = { version = "0.7" }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+clap = { version = "4", features = ["derive", "env"] }
+# Note: native `async fn` in traits (1.75+) is still not dyn-compatible.
+# Prefer manual `Pin<Box<dyn Future + Send + '_>>` (see storage/MCP templates)
+# or add `async-trait` only when a crate actually uses `#[async_trait]`.
+# https://docs.rs/async-trait/latest/async_trait/
+tokio-test = "0.4"
+proptest = "1"
+insta = { version = "1", features = ["yaml"] }
+colored = "3"
+criterion = { version = "0.8", features = ["html_reports"] }
+
+# ─── cargo-release configuration ─────────────────────────────────────────────────────
+# Instruct `cargo release` to version all workspace members together.
+# Run: cargo release --workspace patch   (or minor / major)
+# Docs: https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md
+[workspace.metadata.release]
+shared-version = true
+consolidate-commits = true
+pre-release-commit-message = "chore: release v{{version}}"
+tag-message = "Release v{{version}}"
+tag-name = "v{{version}}"
+release = true
+
+# ─── Build profiles ───────────────────────────────────────────────────────────
+[profile.dev]
+opt-level = 0
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.fast-dev]
+inherits = "dev"
+debug = 0
+strip = "debuginfo"
+panic = "abort"
+
+[profile.fast-dev.build-override]
+opt-level = 3
+
+# Optimised release: maximum runtime performance at the cost of build time.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = "symbols"
+
+# Alias for release with the same settings — kept for backward compatibility
+[profile.release-full]
+inherits = "release"
+
+# Fast CI profile: 95% of release perf at ~50% compile time.
+[profile.ci]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+strip = false
+
+[profile.bench]
+opt-level = 3
+debug = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# ─── cargo-mutants configuration ─────────────────────────────────────────────
+[workspace.metadata.cargo-mutants]
+exclude_re = [
+    "^examples/",
+    "^crates/xtask/",
+]

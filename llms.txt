@@ -1,0 +1,65 @@
+# Rust 2026 Template
+
+> A production-ready Rust workspace template with modern tooling, CI/CD, and AI agent integration.
+>
+> This file is auto-generated. For complete source context, see llms-full.txt.
+> Version: 0.0.0
+
+## Project Overview
+
+This is a comprehensive Rust workspace template designed for 2026 best practices. It includes a multi-crate workspace structure, integrated testing with nextest, and specialized AI agent support.
+
+## Documentation Map
+
+- **README.md**: Human-first project overview and feature set.
+- **QUICKSTART.md**: Step-by-step setup and developer onboarding.
+- **AGENTS.md**: Canonical rules and instructions for coding agents.
+- **.agents/skills/**: Executable task knowledge and workflows.
+- **.agents/context/**: Cross-repo context for derived repositories.
+- **llms.txt**: Token-efficient project context (this file).
+- **.template/architecture.svg**: Visual representation of the project architecture.
+
+## Architecture
+
+```
+rust-2026-template/
+├── .agents/skills/          # AI agent skill definitions
+├── .cargo/config.toml       # Cargo linker + profile config
+├── .github/workflows/       # CI/CD GitHub Actions
+├── scripts/                 # Development and quality scripts
+├── crates/                  # Workspace member crates
+├── AGENTS.md                # Canonical AI agent guidance
+├── Cargo.toml               # Workspace manifest
+└── README.md                # Project documentation
+```
+
+## Key Files
+
+### Configuration & Health
+- `Cargo.toml`: Workspace manifest
+- `rust-toolchain.toml`: Pinned toolchain (1.88+)
+- `ci-summary.md`: Current CI health status (in .agents/ci/)
+- `deny.toml`: Security and license policy
+
+### Cross-Repo Context
+- `.agents/context/external-repos.json`: Linked repositories and their agent context
+- `.agents/context/shared-conventions.md`: Conventions that apply across all derived repos
+
+### AI Agent Skills
+- `build-rust`, `lint-rust`, `test-rust`, `release-rust`
+- `anti-ai-slop`, `privacy-first`, `crates-io-name-check`
+
+## Development Commands
+
+- `cargo build --workspace`: Build all crates
+- `./scripts/code-quality.sh check`: Run all quality checks
+- `cargo nextest run --workspace`: Run all tests
+- `./scripts/quality-gates.sh`: Run all quality gates
+
+## Code Conventions
+
+- **File Size**: Max 500 LOC per source file
+- **Lints**: Zero clippy warnings allowed (pedantic set)
+- **Safety**: `#![forbid(unsafe_code)]` enforced
+- **Error Handling**: `thiserror` (libs), `anyhow` (bins)
+- **Documentation**: Public items require `///` comments

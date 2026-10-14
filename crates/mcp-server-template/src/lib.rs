@@ -1,0 +1,365 @@
+//! # MCP Server Template
+//!
+//! A template crate demonstrating Model Context Protocol (MCP) server integration
+//! with dynamic tool registration.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────┐
+//! │          MCP Server                  │
+//! │  ┌─────────────────────────────┐    │
+//! │  │      Tool Registry           │    │
+//! │  │ (Copy-On-Write Arc<HashMap>)│    │
+//! │  └─────────────────────────────┘    │
+//! │           │                          │
+//! │           ▼                          │
+//! │  ┌─────────────────────────────┐    │
+//! │  │      Tool Implementations    │    │
+//! │  │  (EchoTool, CalcTool, ...)   │    │
+//! │  └─────────────────────────────┘    │
+//! └─────────────────────────────────────┘
+//! ```
+//!
+//! ## Features
+//!
+//! - Tool trait with lifecycle hooks
+//! - Registry-based tool dispatch
+//! - Request/response validation
+//! - JSON schema generation
+
+#![forbid(unsafe_code)]
+
+pub mod tool;
+pub mod tools;
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use thiserror::Error;
+use tracing::info;
+
+pub use tool::{Tool, ToolError, ToolRequest, ToolResponse};
+pub use tools::{CalcTool, EchoTool};
+
+/// MCP server error types.
+#[derive(Debug, Error)]
+pub enum ServerError {
+    /// Tool not found in registry.
+    #[error("Tool not found: {0}")]
+    ToolNotFound(String),
+
+    /// Tool execution error.
+    #[error("Tool error: {0}")]
+    Tool(ToolError),
+
+    /// Server initialization error.
+    #[error("Server error: {0}")]
+    Init(String),
+}
+
+impl From<ToolError> for ServerError {
+    fn from(e: ToolError) -> Self {
+        Self::Tool(e)
+    }
+}
+
+/// Tool registry for dynamic dispatch.
+pub type ToolRegistry = HashMap<&'static str, Arc<dyn Tool>>;
+
+/// MCP server with registered tools.
+/// Uses a Copy-On-Write snapshot registry (`std::sync::RwLock<Arc<ToolRegistry>>`)
+/// to ensure contention-light tool dispatches without holding locks across `.await`.
+pub struct McpServer {
+    tools: RwLock<Arc<ToolRegistry>>,
+}
+
+impl McpServer {
+    /// Create a new MCP server instance.
+    pub fn new() -> Self {
+        Self {
+            tools: RwLock::new(Arc::new(HashMap::new())),
+        }
+    }
+
+    /// Register a tool with the server.
+    pub async fn register<T: Tool + 'static>(&self, tool: T) -> Result<(), ServerError> {
+        let name = tool.name();
+        info!("Registering tool: {}", name);
+        let mut guard = self.tools.write().unwrap_or_else(|e| e.into_inner());
+        let mut new_registry = (**guard).clone();
+        new_registry.insert(name, Arc::new(tool));
+        *guard = Arc::new(new_registry);
+        Ok(())
+    }
+
+    /// List all registered tool names.
+    pub async fn list_tools(&self) -> Vec<String> {
+        let registry = {
+            let guard = self.tools.read().unwrap_or_else(|e| e.into_inner());
+            Arc::clone(&*guard)
+        };
+        registry.keys().map(|s| (*s).to_string()).collect()
+    }
+
+    /// Execute a tool by name with the provided request.
+    pub async fn execute_tool(
+        &self,
+        name: &str,
+        request: ToolRequest,
+    ) -> Result<ToolResponse, ServerError> {
+        // Security: Validate tool name to prevent log injection and resource exhaustion.
+        const MAX_TOOL_NAME_LEN: usize = 64;
+        if name.len() > MAX_TOOL_NAME_LEN {
+            return Err(ServerError::ToolNotFound(format!(
+                "Tool name too long (max {MAX_TOOL_NAME_LEN})"
+            )));
+        }
+
+        // Security: SWAR (SIMD Within A Register) fast-path byte-scan for printable ASCII tool names (0x20..=0x7E).
+        // Checks 8-byte chunks simultaneously, skipping UTF-8 decoding when all bytes are clean printable ASCII.
+        let bytes = name.as_bytes();
+        let mut i = 0;
+
+        while i + 8 <= bytes.len() {
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(&bytes[i..i + 8]);
+            let chunk = u64::from_ne_bytes(arr);
+            let has_low = (chunk.wrapping_sub(0x2020202020202020) & !chunk) & 0x8080808080808080;
+            let has_high = chunk & 0x8080808080808080;
+            let y = chunk ^ 0x7F7F7F7F7F7F7F7F;
+            let zero_check = (y.wrapping_sub(0x0101010101010101) & !y) & 0x8080808080808080;
+            if (has_low | has_high | zero_check) != 0 {
+                break;
+            }
+            i += 8;
+        }
+
+        while i < bytes.len() {
+            let b = bytes[i];
+            if !(0x20..=0x7E).contains(&b) {
+                break;
+            }
+            i += 1;
+        }
+
+        if i < bytes.len()
+            && name[i..].chars().any(|c| {
+                c.is_control()
+                    || matches!(
+                        c,
+                        '\u{200b}'..='\u{200f}'
+                            | '\u{2028}'
+                            | '\u{2029}'
+                            | '\u{202a}'..='\u{202e}'
+                            | '\u{2060}'..='\u{2064}'
+                            | '\u{2066}'..='\u{2069}'
+                    )
+            })
+        {
+            return Err(ServerError::ToolNotFound(
+                "Tool name contains control or Bidi/line-separator characters".to_string(),
+            ));
+        }
+
+        let tool = {
+            let guard = self.tools.read().unwrap_or_else(|e| e.into_inner());
+            guard
+                .get(name)
+                .ok_or_else(|| ServerError::ToolNotFound(name.to_string()))?
+                .clone()
+        };
+        tool.validate(&request.input)?;
+        tool.handle(request).await.map_err(ServerError::Tool)
+    }
+
+    /// Initialize all registered tools.
+    pub async fn init(&self) -> Result<(), ServerError> {
+        let registry = {
+            let guard = self.tools.read().unwrap_or_else(|e| e.into_inner());
+            Arc::clone(&*guard)
+        };
+        for tool in registry.values() {
+            tool.init().await?;
+        }
+        Ok(())
+    }
+}
+
+impl Default for McpServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, missing_docs)]
+
+    use super::*;
+    use serde_json::Value;
+
+    #[tokio::test]
+    async fn test_server_creation() {
+        let server = McpServer::new();
+        let tools = server.list_tools().await;
+        assert!(tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_register_and_list_tools() {
+        let server = McpServer::new();
+        server.register(EchoTool).await.unwrap();
+        server.register(CalcTool).await.unwrap();
+
+        let tools = server.list_tools().await;
+        assert_eq!(tools.len(), 2);
+        assert!(tools.contains(&"echo".to_string()));
+        assert!(tools.contains(&"calc".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_not_found() {
+        let server = McpServer::new();
+        let request = ToolRequest::new(Value::String("test".to_string()));
+        let result = server.execute_tool("nonexistent", request).await;
+        assert!(matches!(result, Err(ServerError::ToolNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_execute_echo_tool() {
+        let server = McpServer::new();
+        server.register(EchoTool).await.unwrap();
+
+        let request = ToolRequest::new(Value::String("hello world".to_string()));
+        let response = server.execute_tool("echo", request).await.unwrap();
+        assert_eq!(response.result, Value::String("hello world".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_execute_calc_tool_add() {
+        let server = McpServer::new();
+        server.register(CalcTool).await.unwrap();
+
+        let request = ToolRequest::new(serde_json::json!({"op": "add", "a": 2.0, "b": 3.0}));
+        let response = server.execute_tool("calc", request).await.unwrap();
+        assert!(response.success);
+        assert_eq!(
+            response.result,
+            Value::Number(serde_json::Number::from_f64(5.0).unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tool_init() {
+        let server = McpServer::new();
+        server.register(EchoTool).await.unwrap();
+        server.register(CalcTool).await.unwrap();
+
+        server.init().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tool_request_with_metadata() {
+        let request = ToolRequest::new(Value::String("test".to_string()))
+            .with_metadata(Value::String("meta".to_string()));
+        assert!(request.metadata.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_tool_response_failure() {
+        let response = ToolResponse::failure("error message".to_string());
+        assert!(!response.success);
+        assert_eq!(response.result, Value::String("error message".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_name_too_long() {
+        let server = McpServer::new();
+        let name = "a".repeat(65);
+        let request = ToolRequest::new(Value::Null);
+        let result = server.execute_tool(&name, request).await;
+        assert!(matches!(result, Err(ServerError::ToolNotFound(msg)) if msg.contains("too long")));
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_name_control_chars() {
+        let server = McpServer::new();
+        let name = "tool\nname";
+        let request = ToolRequest::new(Value::Null);
+        let result = server.execute_tool(name, request).await;
+        assert!(
+            matches!(result, Err(ServerError::ToolNotFound(msg)) if msg.contains("control or Bidi/line-separator characters"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_name_line_separator_and_bidi() {
+        let server = McpServer::new();
+        let request = ToolRequest::new(Value::Null);
+
+        for bad_name in [
+            "tool\u{2028}name",
+            "tool\u{2029}name",
+            "tool\u{202a}name",
+            "tool\u{2066}name",
+            "tool\u{200b}name",
+        ] {
+            let result = server.execute_tool(bad_name, request.clone()).await;
+            assert!(
+                matches!(result, Err(ServerError::ToolNotFound(msg)) if msg.contains("control or Bidi/line-separator characters")),
+                "Expected rejection for name with special char: {bad_name:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_name_byte_scan_lengths() {
+        let server = McpServer::new();
+        let request = ToolRequest::new(Value::Null);
+
+        // Test clean names across lengths 1 to 64 bytes
+        for len in 1..=64 {
+            let name = "a".repeat(len);
+            let result = server.execute_tool(&name, request.clone()).await;
+            // Clean names should pass validation and reach registry lookup (ToolNotFound with the name itself)
+            assert!(
+                matches!(result, Err(ServerError::ToolNotFound(msg)) if msg == name),
+                "Expected ToolNotFound(name) for clean string of length {len}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_name_dirty_chars_at_various_offsets() {
+        let server = McpServer::new();
+        let request = ToolRequest::new(Value::Null);
+
+        // Test invalid control character placed at different byte positions
+        for offset in [0, 3, 7, 8, 15, 16, 31, 63] {
+            let mut name_bytes = vec![b'a'; 64];
+            name_bytes[offset] = 0x07; // ASCII BEL (control char)
+            let bad_name = String::from_utf8(name_bytes).unwrap();
+
+            let result = server.execute_tool(&bad_name, request.clone()).await;
+            assert!(
+                matches!(result, Err(ServerError::ToolNotFound(msg)) if msg.contains("control or Bidi/line-separator characters")),
+                "Expected rejection for control char at offset {offset}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_name_safe_unicode() {
+        let server = McpServer::new();
+        let request = ToolRequest::new(Value::Null);
+
+        // Safe non-ASCII Unicode triggers the slow path (i < bytes.len()) but passes character validation
+        for safe_unicode in ["tool_🦀", "über_tool", "工具_name"] {
+            let result = server.execute_tool(safe_unicode, request.clone()).await;
+            assert!(
+                matches!(result, Err(ServerError::ToolNotFound(ref msg)) if msg == safe_unicode),
+                "Expected ToolNotFound(safe_unicode) for: {safe_unicode}"
+            );
+        }
+    }
+}

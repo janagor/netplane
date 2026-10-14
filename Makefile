@@ -1,0 +1,73 @@
+# VERSION is the single source of truth for the project version
+VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
+
+.PHONY: all docs docs-check ci fmt clippy test build install-doc-tools harness insta-test insta-review version version-check version-propagate
+
+all: ci
+
+ci: version-check fmt clippy test build
+
+fmt:
+	cargo fmt --all -- --check
+
+clippy:
+	cargo clippy --workspace -- -D warnings
+
+test:
+	cargo test --workspace
+
+build:
+	cargo build --workspace
+
+version: ## Show the current project version
+	@echo $(VERSION)
+
+version-check: ## Verify that the VERSION file matches the Cargo.toml version
+	@bash scripts/propagate-version.sh --check
+
+version-propagate: ## Propagate the version from the VERSION file to all Cargo.toml files
+	@bash scripts/propagate-version.sh
+
+install-doc-tools: ## Install pinned versions of doc generation tools (run once)
+	cargo install cargo-sync-readme --version 1.1.0
+	cargo install cargo-doc2readme --version 0.4.0
+
+docs: ## Auto-generate docs/patterns/ from rustdoc comments (run install-doc-tools first)
+	mkdir -p docs/patterns
+	@if [ -f src/lib.rs ]; then cargo sync-readme; fi
+	cargo doc2readme -p example-storage-pattern --out docs/patterns/trait-only-storage.md
+	cargo doc2readme -p example-registry-pattern --out docs/patterns/registry-dispatch.md
+	@# Add AUTO-GENERATED header if not already present
+	@for f in docs/patterns/*.md; do \
+		if ! grep -q "AUTO-GENERATED" "$$f"; then \
+			sed -i '1i <!-- AUTO-GENERATED — edit src/lib.rs in the crate, not this file -->\n' "$$f"; \
+		fi \
+	done
+
+docs-check: docs ## Fail if generated docs differ from committed versions
+	@if [ -f src/lib.rs ]; then cargo sync-readme --check; fi
+	git diff --exit-code docs/patterns/
+
+harness:  ## Run all harness sensors with agent-optimised output
+	bash scripts/harness-check.sh all
+
+insta-test:  ## Run the behavioural snapshot tests
+	cargo test --package workspace-tests --test behaviour_harness
+
+insta-review:  ## Review pending Insta snapshot changes
+	cargo insta review
+
+# Include monitoring targets (opt-in observability stack)
+-include Makefile.monitoring
+
+## monitoring-help: Show available monitoring targets
+monitoring-help:
+	@grep -E '^## ' Makefile.monitoring | sed 's/## /  /'
+
+## Cut a patch release (bumps all workspace members)
+release-patch:
+	cargo release --workspace patch
+
+## Cut a minor release
+release-minor:
+	cargo release --workspace minor

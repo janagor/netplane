@@ -1,0 +1,47 @@
+# Library profile — reusable library with a strict public API surface.
+# Keeps: the renamed example lib and xtask; tests stay with the retained crate.
+[metadata]
+id = "library"
+display_name = "Rust Library"
+description = "Reusable library with strict public API and package checks."
+
+[workspace]
+include_crates = [
+  "crates/example-crate",
+  "crates/xtask",
+]
+exclude_paths = [
+  "benchmarks",
+  "fuzz",
+  ".template",
+  "docs/patterns",
+]
+exclude_workflows = [
+  "cleanup-ci-status.yml",
+  "deploy-docs.yml",
+  "dora-fdrt.yml",
+  "dora-report.yml",
+  "eval.yml",
+  "fuzz.yml",
+  "labeler.yml",
+  "mutants.yml",
+  "patch-release-on-label.yml",
+  "skills-evaluation.yml",
+  "sync-labels.yml",
+  "update-architecture-diagram.yml",
+]
+
+[ci]
+default_tier = "protected-branch"
+
+[policy]
+lockfile = "ignored"
+publish_packages = []
+
+[post_init]
+checklist = [
+  "set-package-metadata",
+  "configure-license-policy",
+  "configure-branch-protection",
+  "declare-public-api-surface",
+]

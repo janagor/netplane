@@ -1,0 +1,112 @@
+# Rust build artifacts
+/target/
+
+# Cargo.lock is intentionally excluded for this library/template repo.
+# If you adopt this template for a *binary* application, remove this line
+# and commit your Cargo.lock. See README.md#cargo-lock-policy for details.
+Cargo.lock
+
+# Generated documentation
+/doc/
+
+# IDE and editor files
+.idea/
+*.iml
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.cursor/
+.cursorrules
+
+# Coverage reports
+lcov.info
+coverage/
+*.profraw
+*.profdata
+
+# Benchmark results
+criterion/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+config/profiles/local.json
+
+# cargo-dist artifacts
+dist/
+
+# Generated reports (keep DORA-REPORT.md tracked)
+# /reports/
+
+# Stale CI status files (use .agents/ci/ instead)
+/ci-status.json
+/ci-summary.md
+
+# Volatile CI telemetry artifacts (uploaded as GH Actions artifacts, not committed)
+.agents/ci/quality-run.json
+.agents/ci/quality-summary.md
+
+# cargo-fuzz artifacts
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/coverage/
+fuzz/target/
+fuzz/Cargo.lock
+
+# Flamegraph output
+flamegraph.svg
+perf.data
+perf.data.old
+
+# LLVM profiling data
+default.profraw
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+*.log
+
+# Guardrail: block dummy/test/data files from root
+/dummy_*
+/test_*
+/data_*
+
+# WSL2 Windows line endings
+*.bat~
+
+# proptest regression files (auto-saved failing cases)
+.proptest-regressions/
+
+# cargo-audit advisory DB cache and local registry/git caches
+.cargo/advisory-db/
+.cargo/registry/
+.cargo/git/
+.blackboxcli/
+
+
+# insta pending snapshots
+*.snap.new
+
+# Auto-generated LLM context files
+llms-full.txt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+
+# MiMoCode local state
+.mimocode/
+docs/book/
+
+# Monitoring runtime volumes (if bind-mounted locally)
+monitoring/grafana-data/
+monitoring/prometheus-data/
+
+# commandcode
+.commandcode/

@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# scripts/validate-workflows.sh
+# Validates GitHub Actions workflows for syntax, SHA pinning, and best practices.
+# Usage: ./scripts/validate-workflows.sh
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT" || exit 1
+
+# --- Colors ---
+if [[ -t 1 ]] && [[ "${FORCE_COLOR:-}" != "0" ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  NC='\033[0m'
+else
+  RED=''
+  GREEN=''
+  YELLOW=''
+  BLUE=''
+  NC=''
+fi
+
+pass() { echo -e "${GREEN}[PASS]${NC} $1"; }
+fail() { echo -e "${RED}[FAIL]${NC} $1"; FAILED=1; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+
+FAILED=0
+WORKFLOWS_DIR="${WORKFLOWS_DIR:-.github/workflows}"
+
+if [[ ! -d "$WORKFLOWS_DIR" ]]; then
+  echo -e "${RED}[ERROR]${NC} Workflows directory not found: $WORKFLOWS_DIR"
+  exit 1
+fi
+
+info "Validating GitHub Actions workflows..."
+echo ""
+
+# 1. YAML syntax check (optional — skip cleanly when PyYAML/yq missing)
+info "Checking YAML syntax..."
+YAML_OK=true
+YAML_SKIPPED=false
+if command -v python3 &>/dev/null && python3 -c "import yaml" 2>/dev/null; then
+  for f in "$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml; do
+    [[ -f "$f" ]] || continue
+    if ! python3 -c "import yaml; yaml.safe_load(open('$f'))" 2>/dev/null; then
+      fail "YAML syntax error: $f"
+      YAML_OK=false
+    fi
+  done
+elif command -v yq &>/dev/null; then
+  for f in "$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml; do
+    [[ -f "$f" ]] || continue
+    if ! yq '.' "$f" >/dev/null 2>&1; then
+      fail "YAML syntax error: $f"
+      YAML_OK=false
+    fi
+  done
+else
+  warn "PyYAML/yq not installed — skipping YAML syntax check (optional: pip install pyyaml)"
+  YAML_SKIPPED=true
+fi
+if $YAML_OK && ! $YAML_SKIPPED; then
+  pass "YAML syntax: all valid"
+elif $YAML_OK && $YAML_SKIPPED; then
+  pass "YAML syntax: skipped (no parser)"
+fi
+echo ""
+
+# 2. SHA pinning check
+info "Checking action SHA pinning..."
+PINNING_ISSUES=0
+for f in "$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml; do
+  [[ -f "$f" ]] || continue
+  # Find uses: lines that reference actions with tags instead of SHAs
+  while IFS= read -r line; do
+    # Skip local actions (./) and reusable workflows
+    if echo "$line" | grep -qE 'uses:\s*\./'; then
+      continue
+    fi
+    # Check for tag-based refs (v1, v2, main, master) without SHA
+    if echo "$line" | grep -qE 'uses:\s*[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+@[^#]+[^@]*$'; then
+      ref=$(echo "$line" | sed -n 's/.*uses:\s*.*@\([^#]*\).*/\1/p' | tr -d ' ')
+      # Allow SHA refs (40+ hex chars) and local paths
+      if [[ ${#ref} -lt 40 ]] && ! echo "$ref" | grep -qE '^[a-f0-9]{40,}$'; then
+        fail "Tag-based ref in $(basename "$f"): $ref (SHA pinning required)"
+        PINNING_ISSUES=$((PINNING_ISSUES + 1))
+      fi
+    fi
+  done < <(grep -n 'uses:' "$f" 2>/dev/null || true)
+done
+if [[ $PINNING_ISSUES -eq 0 ]]; then
+  pass "SHA pinning: all actions pinned"
+else
+  fail "SHA pinning: $PINNING_ISSUES tag-based references found"
+fi
+echo ""
+
+# 3. Required fields check
+info "Checking workflow structure..."
+STRUCTURE_OK=true
+for f in "$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml; do
+  [[ -f "$f" ]] || continue
+  fname=$(basename "$f")
+  if ! grep -q '^name:' "$f"; then
+    fail "$fname: missing 'name' field"
+    STRUCTURE_OK=false
+  fi
+  if ! grep -q '^on:' "$f" && ! grep -q '^"on":' "$f"; then
+    fail "$fname: missing 'on' trigger"
+    STRUCTURE_OK=false
+  fi
+  if ! grep -q '^jobs:' "$f"; then
+    fail "$fname: missing 'jobs' section"
+    STRUCTURE_OK=false
+  fi
+done
+if $STRUCTURE_OK; then
+  pass "Workflow structure: all valid"
+fi
+echo ""
+
+# 4. Permissions check
+info "Checking permissions declarations..."
+PERM_ISSUES=0
+for f in "$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml; do
+  [[ -f "$f" ]] || continue
+  fname=$(basename "$f")
+  # Check if top-level permissions are declared (restrictive by default)
+  if ! grep -q '^permissions:' "$f"; then
+    fail "$fname: no top-level permissions (least privilege required)"
+    PERM_ISSUES=$((PERM_ISSUES + 1))
+  fi
+done
+if [[ $PERM_ISSUES -eq 0 ]]; then
+  pass "Permissions: all workflows declare permissions"
+else
+  fail "Permissions: $PERM_ISSUES workflows without explicit permissions"
+fi
+echo ""
+
+# 5. GOAP live-state check (ADR 0005)
+# GOAP_STATE.md is a tracked pointer (<=20 lines, no hashes/PR refs/log pastes).
+# _status.json must match schema/goap-status.schema.json (closed schema).
+info "Checking GOAP live state..."
+GOAP_STATE_FILE="${GOAP_STATE_FILE:-plans/GOAP_STATE.md}"
+GOAP_STATUS_FILE="${GOAP_STATUS_FILE:-plans/_status.json}"
+GOAP_SCHEMA_FILE="schema/goap-status.schema.json"
+if [[ -f "$GOAP_STATE_FILE" ]]; then
+  GOAP_LINES=$(wc -l <"$GOAP_STATE_FILE" | tr -d ' ')
+  if [[ "$GOAP_LINES" -gt 20 ]]; then
+    fail "GOAP state too long: $GOAP_STATE_FILE has $GOAP_LINES lines (max 20, ADR 0005)"
+  else
+    pass "GOAP state size: $GOAP_LINES lines (max 20)"
+  fi
+  if grep -qE '[0-9a-f]{7,40}|#[0-9]+' "$GOAP_STATE_FILE"; then
+    fail "GOAP state contains commit hashes or PR/issue refs ($GOAP_STATE_FILE, ADR 0005)"
+  else
+    pass "GOAP state content: no hashes or PR/issue refs"
+  fi
+else
+  fail "GOAP state file missing: $GOAP_STATE_FILE"
+fi
+if [[ -f "$GOAP_STATUS_FILE" ]] && [[ -f "$GOAP_SCHEMA_FILE" ]]; then
+  if command -v python3 &>/dev/null; then
+    if ! GOAP_STATUS_FILE="$GOAP_STATUS_FILE" GOAP_SCHEMA_FILE="$GOAP_SCHEMA_FILE" python3 - <<'EOF' 2>/dev/null; then
+import json, os, sys
+status = json.load(open(os.environ["GOAP_STATUS_FILE"]))
+schema = json.load(open(os.environ["GOAP_SCHEMA_FILE"]))
+allowed = set(schema.get("properties", {}).keys())
+required = set(schema.get("required", []))
+keys = set(status.keys())
+if not required.issubset(keys):
+    sys.exit(1)
+if keys - allowed:
+    sys.exit(1)
+if not isinstance(status.get("phases"), list):
+    sys.exit(1)
+if status.get("active_plan") is not None and not isinstance(status.get("active_plan"), str):
+    sys.exit(1)
+if status.get("handover_ref") is not None and not isinstance(status.get("handover_ref"), str):
+    sys.exit(1)
+EOF
+      fail "GOAP status invalid: $GOAP_STATUS_FILE does not match $GOAP_SCHEMA_FILE"
+    else
+      pass "GOAP status: valid against schema"
+    fi
+  else
+    warn "GOAP status: python3 unavailable, schema check skipped"
+  fi
+else
+  fail "GOAP status or schema missing: $GOAP_STATUS_FILE / $GOAP_SCHEMA_FILE"
+fi
+echo ""
+
+# Summary
+if [[ $FAILED -ne 0 ]]; then
+  echo -e "${RED}Workflow validation FAILED${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}Workflow validation passed${NC}"

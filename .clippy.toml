@@ -1,0 +1,38 @@
+# HARNESS FEEDFORWARD GUIDE: .clippy.toml
+# This file controls cargo clippy configuration for rust-2026-template.
+# Agents: read this file before running clippy to understand which lints are intentionally suppressed.
+#
+# Allowed lints (with rationale):
+# — Add entries here with comments explaining WHY an exception is granted.
+#    Never add exceptions without a rationale comment.
+#
+# .clippy.toml - Clippy lint configuration for Rust 2026 best practices
+
+# Cognitive complexity threshold for functions
+cognitive-complexity-threshold = 15
+
+# Allow certain naming patterns
+allow-mixed-uninlined-format-args = false
+
+# Minimum items before suggest collect
+# 512 BYTES trips large_stack_arrays on promoted aggregates (const tables,
+# fixture data, generic AsRef boundaries) whose diagnostics carry no span
+# (known clippy limitation: the warning attributes to this file instead of
+# the code). 64 KiB still catches pathological stack arrays while allowing
+# legitimate test fixtures and lookup tables.
+array-size-threshold = 65536
+
+# Enforce documentation for public items
+missing-docs-in-crate-items = false
+
+# Maximum struct field count before suggesting builder
+too-many-arguments-threshold = 7
+
+# Vec<Box<T>> warn threshold
+vec-box-size-threshold = 4096
+
+# Maximum number of single char bindings
+single-char-binding-names-threshold = 4
+
+# Minimum string length for suggest using a constant
+msrv = "1.88"

@@ -1,0 +1,141 @@
+---
+name: self-fix-loop
+description: >
+  Self-learning fix loop - commit, push, monitor CI, auto-fix failures using
+  swarm agents with skills on demand, loop until all checks pass.
+  Supports GitHub Actions and GitLab CI.
+  Use when CI fails and you need to iteratively fix until green.
+  Triggers: "fix CI", "loop until green", "auto-fix failures", "self-fix".
+
+license: MIT
+metadata:
+  category: workflow
+  author: d-oit
+  version: "0.3.0"
+  adapted-from: d-o-hub/github-template-ai-agents
+---
+
+# Self-Fix Loop Skill
+
+## When to Use
+
+Automated self-learning cycle: **commit → push → monitor → analyze failures → fix → retry** until all CI checks pass.
+
+**Self-Fix Threshold**: If 2+ similar errors occur during the loop, pause and diagnose the root cause before attempting another fix.
+
+## Overview
+
+Continuous improvement loop that:
+1. Commits all changes atomically
+2. Pushes to feature branch
+3. Creates/updates PR/MR
+4. Monitors CI (GitHub Actions or GitLab CI)
+5. On failure: diagnoses and fixes
+6. Repeats until ALL checks pass
+
+## Platform Detection
+
+Auto-detect from git remote:
+
+```bash
+REMOTE=$(git remote get-url origin)
+if echo "$REMOTE" | grep -qi "github"; then
+  PLATFORM="github"; CLI="gh"
+elif echo "$REMOTE" | grep -qi "gitlab"; then
+  PLATFORM="gitlab"; CLI="glab"
+fi
+```
+
+## CLI Command Mapping
+
+| Action | GitHub (`gh`) | GitLab (`glab`) |
+|--------|---------------|-----------------|
+| Check CI | `gh pr checks` | `glab ci status` |
+| Create PR/MR | `gh pr create` | `glab mr create` |
+| View logs | `gh run view --log-failed` | `glab ci view` |
+
+## Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--max-retries N` | Maximum fix iterations | 5 |
+| `--platform github\|gitlab` | Force platform | auto-detect |
+| `--auto-research` | Use web research on failures | true |
+| `--fix-issues` | Attempt automatic fixes | true |
+| `--strict-validation` | ALL checks must pass | true |
+| `--timeout SECONDS` | Per-iteration timeout | 1800 |
+| `--dry-run` | Simulate without pushing | false |
+
+## Loop Phases
+
+```
+[Start]
+   ↓
+Phase 1: COMMIT & PUSH
+   - Stage all changes
+   - Run quality gate
+   - Atomic commit
+   - Push to feature branch
+   ↓
+Phase 2: CREATE/UPDATE PR/MR
+   - Create new PR/MR or update existing
+   ↓
+Phase 3: MONITOR CI
+   - Poll GitHub Actions / GitLab CI
+   - Wait for all checks complete
+   ↓
+Phase 4: ANALYZE FAILURES
+   - Identify failed checks
+   - Extract error messages
+   - Categorize failure type
+   ↓
+Phase 5: FIX (if failures)
+   - Diagnose root cause
+   - Apply fixes
+   - Commit fix
+   ↓
+Phase 6: RETRY LOOP
+   - If retries remaining → Phase 1
+   - If max retries → FAIL
+   - If all pass → SUCCESS
+```
+
+## Rust Failure Types
+
+| Failure Type | Action |
+|--------------|--------|
+| `cargo fmt` | Run `cargo fmt --all` |
+| `cargo clippy` | Fix warnings, respect `-D warnings` |
+| `cargo test` | Debug test failures, fix or skip flaky |
+| `cargo audit` | Update vulnerable dependency (refer to `.agents/ci/regression-matrix.json`) |
+| `cargo deny` | Fix license or advisory violations (refer to `.agents/ci/regression-matrix.json`) |
+| `markdownlint` | Fix heading increments/links (refer to `.agents/ci/regression-matrix.json`) |
+| `gitleaks` | Remove secret or add exception (refer to `.agents/ci/regression-matrix.json`) |
+| `cargo machete` | Remove unused dependencies |
+| Linker errors | Check `build-essential`, `pkg-config` |
+
+## Stacked PR Interaction
+
+If the current branch is part of a `gh stack` (check: `gh stack view --json 2>/dev/null` succeeds):
+
+1. Commit fixes as NEW commits — never amend stacked commits
+2. Run `gh stack rebase --upstack` to propagate changes to dependent branches
+3. Run `gh stack push` to update all dependent PRs
+
+Do NOT use `git push --force` on stacked branches — use `gh stack push` instead.
+Do NOT use `git commit --amend` — it breaks upstack branch ancestry.
+
+## Rationalizations
+
+| Rationalization | Reality |
+|-----------------|---------|
+| "The loop is stuck, I'll just force merge" | Force merging defeats the purpose of CI and introduces regressions. |
+| "One more retry should fix it" | Repeated identical failures indicate a root cause, not a flaky test. |
+| "I'll disable strict validation to pass faster" | Strict validation catches issues early; disabling it pushes bugs to production. |
+
+## Red Flags
+
+- [ ] Exceeding max retries without diagnosing root cause
+- [ ] Disabling strict validation to bypass failing checks
+- [ ] Force merging when the self-fix loop reports failure
+- [ ] Using `git commit --amend` or `git push --force` on stacked branches (use `gh stack push` instead)

@@ -1,0 +1,27 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# xtask is a development-only binary — not part of the public API.
+# Run with: cargo run -p xtask <subcommand>
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+toml = { workspace = true }
+toml_edit = "0.25"
+thiserror = { workspace = true }
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"

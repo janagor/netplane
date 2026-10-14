@@ -1,0 +1,79 @@
+# .cargo/config.toml — Cross-platform linker configuration
+# Works on: Linux, macOS, WSL2, and Windows (MSVC + GNU)
+
+# ─── Linux: mold linker via clang (OPTIONAL — off by default for portability) ─
+# mold is the fastest available linker on Linux, ~7x faster than default ld.
+# Requires: apt install mold clang  (Ubuntu/Debian)  or  brew install mold (Linuxbrew)
+# Left commented so codespaces without mold still build. Uncomment after install.
+# On Rust ≥1.90, rustc uses rust-lld by default on x86_64-unknown-linux-gnu
+# (no mold required): https://blog.rust-lang.org/2025/09/01/rust-lld-on-1.90.0-stable/
+# MSRV for this template is 1.88, so do not assume rust-lld is default everywhere.
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+# [target.aarch64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# ─── macOS: default linker ──────────────────────────────────────────────────
+# macOS's default ld64 is already fast, especially on Apple Silicon.
+# No custom config needed — leaving these targets unconfigured.
+# If you want to experiment with mold on macOS (sold), uncomment:
+# [target.aarch64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/bin/ld64.mold"]
+# [target.x86_64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/usr/local/bin/ld64.mold"]
+
+# ─── Windows MSVC: rust-lld ─────────────────────────────────────────────────
+# rust-lld ships with the Rust toolchain — no extra install needed.
+# Benchmarks show 2-5x faster linking vs default MSVC link.exe.
+# [target.x86_64-pc-windows-msvc]
+# linker = "rust-lld"
+
+# [target.aarch64-pc-windows-msvc]
+# linker = "rust-lld"
+
+# ─── Windows GNU (MinGW): rust-lld ──────────────────────────────────────────
+# [target.x86_64-pc-windows-gnu]
+# linker = "rust-lld"
+
+# [target.aarch64-pc-windows-gnu]
+# linker = "rust-lld"
+
+# ─── WSL2 note ──────────────────────────────────────────────────────────────
+# WSL2 uses the Linux x86_64 target. To use mold in WSL2, follow the Linux setup
+# instructions in docs/src/faster-builds.md.
+
+# ─── Dev profile disk space optimization ────────────────────────────────────
+# Reduces target/ from ~5GB to ~2GB in large workspaces.
+# Maintains fast compilation with essential debug info.
+[profile.dev]
+debug = "line-tables-only"    # ~60% smaller debug artifacts vs. full debug
+
+[profile.dev.package."*"]
+debug = false                  # No debug info for dependencies (huge savings)
+
+[profile.dev.build-override]
+opt-level = 3                  # Fast proc-macro execution
+
+# Full debug profile when needed (cargo build --profile debugging)
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+# ─── Cargo alias shortcuts ─────────────────────────────────────────────────
+[alias]
+# Quick quality check
+check-all = "check --workspace --all-features"
+# Run all tests with nextest
+test-all = "nextest run --workspace"
+# Format check (CI-friendly)
+fmt-check = "fmt --all -- --check"
+# Lint with strict warnings
+lint = "clippy --workspace --all-targets --all-features -- -D warnings"
+# Release check
+release-check = "semver-checks check-release"
+# Dependency audit
+audit-check = "deny check"
+# Roast Scorer
+roast = "run --example roast-scorer"

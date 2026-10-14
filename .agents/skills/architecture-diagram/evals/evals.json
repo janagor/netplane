@@ -1,0 +1,38 @@
+{
+  "skill_name": "architecture-diagram",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Regenerate the overview diagram in Excalidraw format so I can review the layout before publishing it",
+      "expected_output": "Runs scripts/generate_overview.py with --no-export and writes an Excalidraw JSON file containing the section frames",
+      "files": [],
+      "assertions": [
+        "Runs python .agents/skills/architecture-diagram/scripts/generate_overview.py with --no-export",
+        "Writes a file whose content contains \"type\": \"excalidraw\"",
+        "Generated file contains the section heading texts GETTING STARTED, BY THE NUMBERS, and HOW IT CONNECTS"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Update the overview infographic and check that the numbered stats still reflect the current repo size",
+      "expected_output": "Generated Excalidraw file contains a BY THE NUMBERS frame and arrow elements bound to start and end elements",
+      "files": [],
+      "assertions": [
+        "Generated file contains \"BY THE NUMBERS\"",
+        "Generated file contains \"type\": \"arrow\"",
+        "Generated file contains \"startBinding\" and \"endBinding\""
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Regenerate the overview but write it somewhere other than the default path so I can diff it against the current one",
+      "expected_output": "Excalidraw file is written to the custom path passed via --out",
+      "files": [],
+      "assertions": [
+        "Passes a custom --out path to generate_overview.py",
+        "A file exists at that custom --out path",
+        "Custom-path file contains \"type\": \"excalidraw\""
+      ]
+    }
+  ]
+}
