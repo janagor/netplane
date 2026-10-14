@@ -85,6 +85,11 @@ impl InitPlan {
         blueprint: &TemplateProfile,
         identity: &ProjectIdentity,
     ) -> Result<Self, XtaskError> {
+        let root = root.canonicalize().map_err(|e| XtaskError::InvalidConfig {
+            message: format!("repository root {} is not accessible: {e}", root.display()),
+        })?;
+        let root = root.as_path();
+
         let crates_dir = root.join("crates");
         let existing = list_crate_dirs(&crates_dir)?;
         let removed_names = blueprint.removed_crates(&existing);

@@ -135,11 +135,56 @@ fn rel_paths(plan: &InitPlan) -> Vec<String> {
         .iter()
         .map(|p| {
             p.strip_prefix(&plan.root)
-                .unwrap()
-                .to_string_lossy()
-                .into_owned()
+                .expect("removal must be contained in plan root")
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
         })
         .collect()
+}
+
+#[test]
+fn plan_normalizes_repository_root() {
+    let (_dir, root) = fixture();
+    let aliased_root = root.join("..").join(root.file_name().unwrap());
+
+    let plan = build_plan(&aliased_root);
+
+    assert_eq!(plan.root, root.canonicalize().unwrap());
+    for path in &plan.removals {
+        assert!(
+            path.strip_prefix(&plan.root).is_ok(),
+            "removal {path:?} is not under root {:?}",
+            plan.root
+        );
+    }
+    if let Some(rename) = &plan.rename {
+        assert!(rename.from.starts_with(&plan.root));
+        assert!(rename.to.starts_with(&plan.root));
+    }
+    for rewrite in [
+        plan.workspace_manifest.as_ref(),
+        plan.crate_manifest.as_ref(),
+        plan.ci_config.as_ref(),
+        plan.gitignore.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(plan.text_replacements.iter())
+    {
+        assert!(
+            rewrite.path.starts_with(&plan.root),
+            "rewrite {:?} is outside root {:?}",
+            rewrite.path,
+            plan.root
+        );
+    }
+
+    apply::execute(&plan).unwrap();
+    assert!(!root.join("benchmarks").exists());
+    assert!(!root.join("crates/example-crate").exists());
+    assert!(root.join("crates/my-app").exists());
 }
 
 // Ported from upstream `prune_default_members` tests (issue #321) to prove the
