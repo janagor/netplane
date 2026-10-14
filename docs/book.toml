@@ -1,6 +1,6 @@
 [book]
-title = "Rust 2026 Template"
-authors = ["Maintainer"]
+title = "Netplane"
+authors = ["Netplane contributors"]
 language = "en"
 src = "src"
 

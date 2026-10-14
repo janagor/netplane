@@ -1,128 +1,45 @@
-# Agent Coding Contract
+# Netplane agent coding contract
 
-> **2026 Best Practice Rust Template** - This is the single canonical instruction file for all AI agents.
-> Tool-specific files (`CLAUDE.md`, `GEMINI.md`, etc.) are thin adapters that point here.
+Netplane is a reusable Rust library for dynamically reconfigurable Tower service graphs. The current crate is a scaffold: do not describe graph execution, hot replacement, or lifecycle guarantees as implemented. Read [docs/architecture.md](docs/architecture.md) and the decisions in `docs/adr/` before changing the public API.
 
-## Quick Reference
+## Workspace
 
-| Task | Command |
-|------|----------|
-| Build | `cargo build --workspace` |
-| Quality | `./scripts/quality-gates.sh` |
-| Tests | `cargo nextest run --workspace` |
-| Setup | `./scripts/bootstrap.sh` |
-| Diagnostics | `./scripts/doctor.sh` |
+| Path | Responsibility |
+| --- | --- |
+| `crates/netplane` | Public library and future transport-independent graph runtime. |
+| `crates/xtask` | Development automation; never a runtime dependency of the library. |
+| `docs/architecture.md`, `docs/adr/` | Design requirements and accepted decisions. |
 
-## Project Structure
+Add crates only when a concrete dependency boundary emerges. Keep transport and deployment adapters outside the core. Add dependencies when they have consumers, use workspace versions, and minimize dependencies exposed by the public API.
 
-- `.agents/skills/`: Executable task knowledge and canonical workflows.
-- `.agents/skills/harness/`: Harness engineering — sensor response protocol and self-correction.
-- `crates/`: Workspace members (libraries and applications).
-- `scripts/`: Development, quality, and release automation.
-- `plans/adr/`: Architecture Decision Records.
-- `.githooks/`: Pre-commit quality enforcement.
-- `AGENTS.md`: THIS FILE (Canonical Project Contract).
+## Design rules
 
-## Agent Skills (.agents/skills/)
+- Interoperate with `tower::Service` and preserve readiness semantics. Avoid a competing service abstraction without a demonstrated need.
+- Keep readiness and dispatch for each request on the same service instance and graph version, including across publication.
+- Validate a replacement graph before publishing it. Treat published graph versions as immutable.
+- Make ownership and request lifetime explicit so in-flight requests keep required resources through completion or cancellation.
+- Bound concurrency, queues, and task creation. Never hide overload with unbounded spawning.
+- Keep locks out of `.await` spans. Use `tokio` only when runtime work needs it; offload blocking or long CPU work appropriately.
+- Make cancellation, timeout, and shutdown cleanup observable and testable.
+- Test core behavior with mock services, without sockets. Cover graph lifetime, readiness, backpressure, and concurrency as those features are implemented.
+- Do not implement HTTP listeners, Kubernetes integration, or cloud deployment as part of the initial graph runtime.
 
-The skills index is **auto-generated** from skill frontmatter. Do not edit the table below manually.
+## Rust and API conventions
 
-**Regenerate after adding/modifying skills:**
+- Rust 2024, MSRV 1.88. Do not raise the MSRV without a dependency or feature requirement.
+- Forbid unsafe code in the library. Use typed errors when needed; avoid `unwrap` and `expect` in production library code.
+- Document every public item, including error and cancellation behavior. Prefer a small stable surface; keep implementation details private.
+- Add or update meaningful tests before changing behavior. Inspect snapshot diffs before accepting them.
+- Follow workspace lint settings. A justified lint exception belongs in the crate manifest with its reason.
+- Keep source files under 500 lines. Do not put secrets or personal contact data in source or docs.
+- `VERSION` and workspace version remain `0.0.0` until a deliberate release decision. The library is not currently published.
 
-```bash
-bash scripts/generate-skills-md.sh
-```
+## Workflow
 
-<!-- AUTO-GENERATED: see .agents/SKILLS.md for full table -->
-Consult `.agents/SKILLS.md` for the complete skills index, or read individual skill docs at `.agents/skills/<name>/SKILL.md`.
+1. Check `git status`, nearby code, the architecture documents, and the current `.github/workflows/ci.yml` before editing.
+2. Identify affected behavior and tests. Add tests first when changing logic.
+3. Run focused checks. Use `./scripts/quality-gates.sh` when its optional tools are installed and its repository scan can run in the local environment. At minimum, run format, Clippy, build, and tests for code changes.
+4. Update documentation when architecture or public behavior changes. Run `bash scripts/generate-llms-txt.sh` after significant architecture changes.
+5. Use lowercase Conventional Commit subjects if asked to commit.
 
-## Multi-Agent Support
-
-Skill symlinks are managed automatically. After cloning, run:
-
-```bash
-./scripts/bootstrap.sh    # One-command setup
-./scripts/doctor.sh        # Environment diagnostics
-```
-
-CLI-specific directories read from `.agents/skills/` via symlinks:
-- `.claude/skills/` → Claude Code
-- `.qwen/skills/` → Qwen Code
-- `.gemini/`, `.opencode/`, `.windsurf/` → Read directly
-
-## Session Bootstrap
-
-The repository includes a `SessionStart` hook to auto-inject project context at the start of an agent session. This helps agents orient themselves quickly without manual discovery.
-
-- **Hook:** `hooks/session-start.sh`
-- **Config:** `docflow.json`
-- **Integration:** Registered in `.claude/settings.json` for Claude.
-
-## Cross-Repo Context
-
-Derived repositories should check `.agents/context/` for shared conventions and related repository links.
-
-- **`.agents/context/external-repos.json`**: Links to related repos and their agent context URLs
-- **`.agents/context/shared-conventions.md`**: Cross-repo coding conventions (commit format, branch naming, PR requirements)
-
-**Merge precedence**: Local repo instructions > imported context > template defaults.
-
-## Coding Conventions
-
-### Rust & Concurrency
-- **Edition:** Rust 2024 (MSRV 1.88). Edition 2024 requires ≥1.85; 1.88 is intentional for broader codespace/toolchain compatibility. Do not bump MSRV unless required by a dependency. https://doc.rust-lang.org/edition-guide/rust-2024/index.html
-- **Versions:** `VERSION` / workspace `0.0.0` is the **adopter app** version (start here). Template meta-releases (e.g. v0.3.x) live only in `.template/CHANGELOG-TEMPLATE.md` — do not sync them into `VERSION`.
-- **Safety:** `#![forbid(unsafe_code)]` at workspace and crate roots.
-- **Errors:** `thiserror` for libraries, `anyhow` for binaries. No `unwrap()` in libs.
-- **Async:** Use `tokio` when you need a runtime. CLI apps that use async: prefer `#[tokio::main(flavor = "current_thread")]`. Sync `main` is fine when no async is required (`sample-app`).
-- **Async Safety & Execution:** Choose execution models based on workload characteristics: keep short bounded CPU work on Tokio worker threads, offload genuinely blocking operations or long CPU work to `spawn_blocking` or dedicated worker pools, default to bounded concurrency/channels for backpressure, and keep lock scopes minimal (never across `.await`). Reference `.agents/skills/tokio-performance/SKILL.md` for Tokio architecture choices.
-- **Tracing:** Minimize CLI tracing metadata (thread IDs/names) unless high-concurrency.
-- **Quality SSOT:** Prefer `./scripts/quality-gates.sh` before push. `cargo run -p xtask quality-gates` delegates to that script.
-- **Verification tiers:** Which checks run for each lifecycle trigger (pull request / protected branch / scheduled / release) is configured in `config/xtask.json` (`tiers` map: `pull-request`, `protected-branch`, `scheduled`, `release`) — not in workflow YAML. Override per run via `xtask quality run --tier <name>` or `$XTASK_TIER`. Legacy names `fast-pr` and `full-gate`/`all` are aliases for `pull-request` and `protected-branch`.
-- **When-changed check selection:** `xtask quality run --changed-from <ref>` uses declarative `when_changed` glob mappings in `config/xtask.json` (e.g. `crates/**/*.rs` -> Rust checks, `scripts/**/*.sh` -> ShellCheck). Use `xtask quality explain --changed-from <ref>` to inspect selected vs skipped checks and matched patterns. Unreadable git state fails closed by selecting all checks and recording `fallback_used: true`.
-
-### Security & Configuration
-- **Hardening:** Enforce `#[serde(deny_unknown_fields)]` on config structs.
-- **Safe Loading:** Use `file.take(limit)` and `is_file()` check before reading.
-- **Validation:** Sanitize strings (`is_control()`) and enforce bounds on numeric fields.
-- **Dependencies:** Declare versions in `[workspace.dependencies]` with caret ranges (e.g. `"1"` ≡ `^1`). Library/template crates should ignore `Cargo.lock` (rely on `Cargo.toml` constraints); binary applications should commit it for reproducible builds. Audit with `cargo tree` and `deny.toml`. Prefer lockfile pins over exact `=` requirements in manifests. https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
-- **Secrets:** Never hardcode; use environment variables or `.env`.
-- **Template Portability:** Never hardcode project name, repo URL, or author across source files. All project-specific values must derive from `Cargo.toml` at runtime or be rewriteable via `scripts/init-template.sh`. Avoid magic number thresholds — define named constants.
-
-### Quality & Workflow
-- **File Size:** Max 500 LOC per source file.
-- **Docs:** All public items must have `///` doc comments.
-- **TDD:** Add or update tests before implementing logic.
-- **Snapshots:** Treat snapshot changes as behavior changes. Inspect them with `cargo insta review` and accept only intentional, deterministic output changes; never update snapshots just to clear a failing test.
-- **Search:** Always use `--exclude-dir=target` (and `.git`) in search commands.
-- **Context:** Run `bash scripts/generate-llms-txt.sh` after significant arch changes.
-- **Commits:** Strictly use lowercase for the subject line (e.g., `fix(scope): add ...` not `fix(scope): Add ...`). Sentence-case or start-case will fail CI.
-
-## Change Workflow
-
-1. **Discover:** Read code patterns, module structure, and `.agents/ci/ci-summary.md`.
-2. **Plan:** Identify affected files and required test coverage.
-3. **Test-First:** Add or update tests before logic implementation.
-4. **Implement:** Write code adhering to conventions.
-5. **Quality Check:** Run `./scripts/quality-gates.sh`.
-6. **Commit:** Use conventional commit format.
-
-### Stacked PRs (Optional)
-
-For large features with 3+ distinct concerns, stacked PRs are available via `gh stack`.
-This is OPTIONAL — default to single-PR atomic commits. See `.agents/skills/stacked-prs/SKILL.md`.
-Requires GitHub and `gh` CLI. Install: `gh extension install github/gh-stack`
-
-## Agentic Metrics Reporting
-
-After completing any task, write a JSON event file to `.agents/events/YYYY/MM/DD/`.
-This event-based pattern is also used for CI benchmarks in `benchmarks/events/` to prevent merge conflicts.
-See `.agents/skills/metrics-reporter/` for the schema and event writing procedures.
-Set `human_interventions > 0` if a human corrected your code or provided rework instructions.
-
-## Release Failures (Priority 1)
-
-If a `release-failure` issue is open:
-1. Create a `hotfix/` branch and apply the minimal fix.
-2. Open a PR with the `hotfix` label.
-3. Close the issue with: `Recovered at: <TIMESTAMP>. FDRT: <HOURS>`.
+Use `rg` for repository searches and exclude `.git` and `target`. Repository skills in `.agents/skills/` contain detailed procedures, but this file is the project contract.
