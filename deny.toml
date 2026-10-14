@@ -4,7 +4,7 @@
 
 [graph]
 # Rust edition for the dependency graph
-all-features = false
+all-features = true
 no-default-features = false
 
 [output]
@@ -15,8 +15,6 @@ feature-depth = 1
 # ============================================================
 [advisories]
 version = 2
-# Deny crates with security vulnerabilities
-ignore = []
 
 # ============================================================
 # LICENSES - Enforce acceptable licenses (cargo-deny v2 format)

@@ -4,11 +4,12 @@ The current [CI workflow](https://github.com/janagor/netplane/blob/main/.github/
 
 | Job | Current checks |
 | --- | --- |
-| Format | `cargo fmt --all -- --check` |
-| Clippy | `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
-| Build and test | Workspace build, unit and integration tests, doc tests, package listing, and package dry run |
+| Format and Clippy | `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
+| Build and test | Workspace build, tests, and doc tests on Linux, macOS, and Windows with Rust 1.88, plus stable Rust on Linux; package verification on Linux |
+| Dependency policy | `cargo deny check` with all features, including advisories and licenses; also runs weekly |
+| Build mdBook | `mdbook build docs` |
 
-These jobs use Rust 1.88 on Ubuntu. Other workflow files cover commit messages, security scanning, secrets, dependency automation, and hotfix handling. The current CI workflow does not claim cross-platform coverage or run a scheduled DORA report.
+The quality job uses Rust 1.88; the test matrix distinguishes MSRV from stable Rust. Separate workflows check commit messages and secrets. Secretlint scans tracked files in the checked out tree, including hidden files, but does not scan Git history. Dependabot proposes dependency updates weekly. No graph runtime behavior is implemented yet.
 
 ## Run checks locally
 
@@ -18,9 +19,11 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo build --workspace --all-targets
 cargo test --workspace --all-features
 cargo test --workspace --doc
-cargo package -p netplane --list
+cargo package -p netplane
+cargo deny check
+mdbook build docs
 ```
 
 `./scripts/quality-gates.sh` delegates to `xtask quality run` and offers a broader local check set. Some checks require optional tools. Its repository scan may also include local generated directories, so review its report if it fails outside the tracked workspace. Use the focused commands above to reproduce the required CI jobs.
 
-The CI workflow will be expanded and validated in the separate infrastructure work before any cross-platform or supply-chain check is called required.
+Cross-platform jobs must run on GitHub before their results can be confirmed; local Linux checks do not establish macOS or Windows status.

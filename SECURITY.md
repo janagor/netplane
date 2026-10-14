@@ -2,9 +2,8 @@
 
 ## Supported Versions
 
-This is a **template repository**. Security fixes are applied to the `main` branch only.
-When you use this template to create a new project, you are responsible for applying
-security updates to your fork.
+Netplane is currently an unpublished library scaffold. Security fixes are applied to
+the `main` branch.
 
 | Version | Supported |
 | ------- | --------- |
@@ -25,23 +24,20 @@ Please include:
 - Potential impact
 - Suggested fix (if any)
 
-You will receive an acknowledgment within 48 hours and a full response within 7 days.
+The maintainer will respond through the private advisory channel.
 
 ## Rust-Specific Security Practices
 
-This template enforces the following security practices:
+Netplane uses the following security practices:
 
 ### Dependency Auditing
 
 ```bash
-# Check for known vulnerabilities in dependencies
-cargo audit
-
-# Enforce license and supply chain policy
+# Check advisories, licenses, banned crates, and sources
 cargo deny check
 ```
 
-Both run automatically in CI on every push.
+This check runs on pull requests and pushes to `main`.
 
 ### Supply Chain Security
 
@@ -49,14 +45,11 @@ Both run automatically in CI on every push.
   - Allowed licenses list
   - Banned crates list
   - Advisory database checks
-- Dependabot is configured to auto-update dependencies weekly
+- Dependabot is configured to propose dependency updates weekly
 
 ### Unsafe Code
 
-- All `unsafe` blocks must include a `// SAFETY:` comment explaining invariants
-- Avoid `unsafe` unless absolutely necessary
-- If using `unsafe`, document it in your crate's `lib.rs` with `#![forbid(unsafe_code)]`
-  or explicitly allow and document each usage
+- The library forbids unsafe code.
 
 ### Secrets and Credentials
 
@@ -65,11 +58,5 @@ Both run automatically in CI on every push.
 - The `privacy-first` skill in `.agents/skills/privacy-first/` enforces no email
   addresses in the codebase
 
-## When Using This Template
-
-After creating a project from this template:
-
-1. Update this `SECURITY.md` with your project's security contact
-2. Enable GitHub's Dependabot alerts in your repo settings
-3. Configure branch protection on `main`
-4. Review `deny.toml` and customize for your license requirements
+Repository security settings, including Dependabot alerts and branch protection,
+are managed on GitHub and are separate from the checks defined in this repository.
