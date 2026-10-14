@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/d-oit/rust-2026-template/schema/agent-adapters.schema.json",
+  "$id": "https://github.com/janagor/netplane/schema/agent-adapters.schema.json",
   "title": "Agent Adapter Manifest (.agents/agent-adapters.toml)",
   "description": "Validates the canonical adapter manifest for multi-tool AI agent setups. Enforces thin-adapter architecture where tool-specific files reference the canonical AGENTS.md contract.",
   "type": "object",

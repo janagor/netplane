@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/*", "examples/*", "benchmarks"]
-default-members = ["crates/sample-app"]
+members = ["crates/netplane", "crates/xtask"]
+default-members = ["crates/netplane"]
 resolver = "3"
 exclude = ["fuzz"]
 
@@ -9,17 +9,14 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
-# TODO: Replace these with your actual project metadata
-authors = ["Your Name"]
-repository = "https://github.com/your-org/your-repo"
-homepage = "https://github.com/your-org/your-repo"
-documentation = "https://docs.rs/your-crate"
+authors = ["Jan Aleksander Górski"]
+repository = "https://github.com/janagor/netplane"
+homepage = "https://github.com/janagor/netplane"
+documentation = "https://docs.rs/netplane"
 readme = "README.md"
 include = [
     "/src",
-    "/examples",
     "/tests",
-    "/benchmarks",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -29,7 +26,7 @@ include = [
 
 # Virtual workspace — no root [package].
 # All real code lives in crates/ member crates.
-# See crates/README.md for the layering model.
+# The public library lives in crates/netplane; xtask is development tooling.
 
 [workspace.lints.rust]
 missing_docs = "warn"
@@ -87,24 +84,15 @@ cognitive_complexity = "allow"
 
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
-tokio-util = { version = "0.7" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 clap = { version = "4", features = ["derive", "env"] }
 # Note: native `async fn` in traits (1.75+) is still not dyn-compatible.
 # Prefer manual `Pin<Box<dyn Future + Send + '_>>` (see storage/MCP templates)
 # or add `async-trait` only when a crate actually uses `#[async_trait]`.
 # https://docs.rs/async-trait/latest/async_trait/
-tokio-test = "0.4"
-proptest = "1"
-insta = { version = "1", features = ["yaml"] }
-colored = "3"
-criterion = { version = "0.8", features = ["html_reports"] }
 
 # ─── cargo-release configuration ─────────────────────────────────────────────────────
 # Instruct `cargo release` to version all workspace members together.

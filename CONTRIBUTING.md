@@ -1,11 +1,11 @@
-# Contributing to rust-2026-template
+# Contributing to netplane
 
 Thank you for considering contributing! This is a generic Rust project template.
 
 ## Quick Links
 
-- [Issues](https://github.com/d-oit/rust-2026-template/issues)
-- [Pull Requests](https://github.com/d-oit/rust-2026-template/pulls)
+- [Issues](https://github.com/janagor/netplane/issues)
+- [Pull Requests](https://github.com/janagor/netplane/pulls)
 - [Security Policy](SECURITY.md)
 
 ## Development Setup
@@ -20,8 +20,8 @@ Thank you for considering contributing! This is a generic Rust project template.
 ### Clone and Build
 
 ```bash
-git clone https://github.com/d-oit/rust-2026-template.git
-cd rust-2026-template
+git clone https://github.com/janagor/netplane.git
+cd netplane
 cargo build
 ```
 
@@ -166,6 +166,6 @@ for details.
 
 ## Reporting Issues
 
-Open an issue at: <https://github.com/d-oit/rust-2026-template/issues>
+Open an issue at: <https://github.com/janagor/netplane/issues>
 
 For security vulnerabilities, see [SECURITY.md](SECURITY.md).

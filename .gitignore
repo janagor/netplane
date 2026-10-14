@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+.direnv/
+.agents/events/
 
 # Cargo.lock is intentionally excluded for this library/template repo.
 # If you adopt this template for a *binary* application, remove this line

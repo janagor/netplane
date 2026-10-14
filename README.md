@@ -1,7 +1,6 @@
 # Rust 2026 Template
 
-[![CI](https://github.com/d-oit/rust-2026-template/actions/workflows/ci.yml/badge.svg)](https://github.com/d-oit/rust-2026-template/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/d-oit/rust-2026-template/graph/badge.svg)](https://codecov.io/gh/d-oit/rust-2026-template)
+[![CI](https://github.com/janagor/netplane/actions/workflows/ci.yml/badge.svg)](https://github.com/janagor/netplane/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://www.rust-lang.org)
 [![Template Version](https://img.shields.io/badge/version-0.3.10-blue)](.template/CHANGELOG-TEMPLATE.md#0.3.10)

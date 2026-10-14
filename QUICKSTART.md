@@ -1,4 +1,4 @@
-# Quick Start — rust-2026-template
+# Quick Start — netplane
 
 Get a new Rust project running in under 5 minutes.
 
@@ -130,7 +130,7 @@ Edit these files with your project details:
 
 ```bash
 git add -A
-git commit -m "feat: initialize project from rust-2026-template"
+git commit -m "feat: initialize project from netplane"
 git push origin main
 ```
 
@@ -235,4 +235,4 @@ If you're using this template across multiple repositories, the `.agents/context
 **Merge precedence** (when instructions conflict):
 1. Local repo instructions (AGENTS.md, .agents/skills/) — highest
 2. Imported context (.agents/context/) — secondary
-3. Template defaults (upstream rust-2026-template) — fallback only
+3. Template defaults (upstream netplane) — fallback only

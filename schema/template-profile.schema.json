@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/d-oit/rust-2026-template/schema/template-profile.schema.json",
+  "$id": "https://github.com/janagor/netplane/schema/template-profile.schema.json",
   "title": "Template Profile (config/template-profiles/*.toml)",
   "description": "Validated blueprint for `cargo xtask template init --profile <name>`. TOML files map to this object shape; structural validation is enforced by crates/xtask/src/template_profile.rs.",
   "type": "object",

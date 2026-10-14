@@ -7,6 +7,7 @@
 *.rs     text eol=lf
 *.toml   text eol=lf
 *.lock   text eol=lf -diff
+flake.lock text eol=lf diff
 
 # Shell scripts
 *.sh     text eol=lf

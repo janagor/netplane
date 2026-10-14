@@ -16,7 +16,7 @@ security updates to your fork.
 **Do not open a public GitHub issue for security vulnerabilities.**
 
 Report vulnerabilities by opening a
-[GitHub Security Advisory](https://github.com/d-oit/rust-2026-template/security/advisories/new).
+[GitHub Security Advisory](https://github.com/janagor/netplane/security/advisories/new).
 
 Please include:
 

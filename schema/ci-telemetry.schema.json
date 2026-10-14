@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/d-oit/rust-2026-template/schema/ci-telemetry.schema.json",
+  "$id": "https://github.com/janagor/netplane/schema/ci-telemetry.schema.json",
   "title": "CI Telemetry Artifact (quality-run.json)",
   "description": "Structured telemetry emitted by `xtask quality run` after each CI run. schema_version must match crates/xtask/src/telemetry.rs::SCHEMA_VERSION.",
   "type": "object",

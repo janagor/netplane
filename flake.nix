@@ -1,5 +1,5 @@
 {
-  description = "A Nix-flake-based Rust development environment for rust-2026-template";
+  description = "Netplane Rust development environment";
 
   inputs = {
     nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1";
@@ -32,19 +32,13 @@
     in
     {
       overlays.default = final: prev: {
-        # Mirrors rust-toolchain.toml: stable channel with clippy, rustfmt, rust-src.
-        # Update the channel version here when rust-toolchain.toml is updated.
+        # Use the same pinned channel and components as rust-toolchain.toml.
         rustToolchain =
           with inputs.fenix.packages.${prev.stdenv.hostPlatform.system};
-          combine (
-            with stable; [
-              clippy
-              rustc
-              cargo
-              rustfmt
-              rust-src
-            ]
-          );
+          fromToolchainFile {
+            file = ./rust-toolchain.toml;
+            sha256 = "0jalwpkzg9d5sf9fnjzi462lw4klpj5kg6yj6671slcs1df7q6s3";
+          };
       };
 
       devShells = forEachSupportedSystem (
@@ -52,41 +46,8 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              # Rust toolchain (matches rust-toolchain.toml)
               rustToolchain
-              rust-analyzer
-
-              # Build essentials
-              openssl
-              pkg-config
-              clang
-              mold
-
-              # Cargo tools - mirrors CI pipeline jobs
-              cargo-binstall   # fast binary installs
-              cargo-deny       # supply chain / license checks (deny.toml)
-              cargo-nextest    # test runner (.config/nextest.toml)
-              cargo-audit      # security audit (CI security job)
-              cargo-watch      # local file-watch rebuilds
-
-              # Code quality
-              typos            # typo linter (CI quality gate)
-              just             # task runner (optional: add justfile)
-              tokei            # line count utility
-
-              # Uncomment for WASM targets:
-              # wasm-bindgen-cli
-              # rust-bindgen
-
-              # Uncomment for web UI (Leptos) projects:
-              # cargo-leptos
-              # leptosfmt
-
-              # Uncomment for desktop app (Tauri) projects:
-              # cargo-tauri
-
-              # Uncomment for database projects:
-              # sqlx-cli
+              cargo-nextest
             ];
 
             env = {
