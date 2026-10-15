@@ -17,6 +17,7 @@ publish = false
 workspace = true
 
 [dependencies]
+arc-swap.workspace = true
 tower.workspace = true
 thiserror.workspace = true
 

@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-Netplane is a Rust library for dynamically reconfigurable Tower service graphs. The workspace has a first single-version Tower execution endpoint and `xtask`. Graph publication, version ownership, and shutdown admission control are not implemented yet. This document sets requirements for that future work.
+Netplane is a Rust library for dynamically reconfigurable Tower service graphs. The workspace has a bounded Tower endpoint, immutable version publication, and `xtask`. Shutdown admission control is not implemented yet.
 
 ## Design constraints
 
@@ -29,7 +29,7 @@ Create another crate only when a concrete dependency or API boundary justifies i
 
 Build an in-memory, transport-independent prototype that executes a composition of Tower services and publishes a new graph version. Its integration tests should show that requests already using the old version complete with the correct resources while new requests use the published version. Add focused tests for readiness, bounded concurrency, cancellation, and shutdown as the corresponding mechanisms are introduced.
 
-The prototype will determine concrete types, graph representation, publication mechanism, and feature flags. No HTTP listener or deployment integration is required for this milestone. A service composition or routing tree may be sufficient. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing are not initial requirements; add them only when a concrete use case justifies them.
+The initial prototype uses a Tower service root as its composition, validates positive concurrency and queue capacities, and publishes complete versions with `ArcSwap`. `execute()` selects a version synchronously when invoked and retains it through completion or future drop. Capacity is per version. A dropped future cancels its queue wait, while cancellation of dispatched work depends on the service. There is no HTTP listener or deployment integration. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing are not initial requirements; add them only when a concrete use case justifies them.
 
 ## Decisions
 

@@ -2,7 +2,7 @@
 
 Netplane is an early stage Rust library for constructing and managing dynamically reconfigurable Tower service graphs. It aims to make graph publication, request lifetime, readiness, backpressure, and cancellation behavior explicit.
 
-The repository currently provides a single-version, bounded Tower service endpoint and development tooling. Graph publication and lifecycle management are not implemented yet. Version `0.0.0` marks this pre-release stage; the crate is not published.
+The repository provides bounded Tower service endpoints, atomic publication of validated execution versions, and development tooling. Requests retain the version selected at invocation. Shutdown admission control is not implemented yet. Version `0.0.0` marks this pre-release stage; the crate is not published.
 
 ## Scope
 

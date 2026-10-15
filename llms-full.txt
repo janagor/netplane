@@ -84,235 +84,32 @@ rust-2026-template/
 # Source: README.md
 ================================================================================
 
-# Rust 2026 Template
+# Netplane
 
-[![CI](https://github.com/d-oit/rust-2026-template/actions/workflows/ci.yml/badge.svg)](https://github.com/d-oit/rust-2026-template/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/d-oit/rust-2026-template/graph/badge.svg)](https://codecov.io/gh/d-oit/rust-2026-template)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![MSRV](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://www.rust-lang.org)
-[![Template Version](https://img.shields.io/badge/version-0.3.10-blue)](.template/CHANGELOG-TEMPLATE.md#0.3.10)
+Netplane is an early stage Rust library for constructing and managing dynamically reconfigurable Tower service graphs. It aims to make graph publication, request lifetime, readiness, backpressure, and cancellation behavior explicit.
 
-**Latest release: v0.3.10** — see [`.template/CHANGELOG-TEMPLATE.md`](.template/CHANGELOG-TEMPLATE.md) for the full changelog.
+The repository provides bounded Tower service endpoints, atomic publication of validated execution versions, and development tooling. Requests retain the version selected at invocation. Shutdown admission control is not implemented yet. Version `0.0.0` marks this pre-release stage; the crate is not published.
 
-<!-- cargo-sync-readme start -->
+## Scope
 
-A production-ready Rust workspace template with modern tooling, CI/CD and AI agent integration.
+Netplane builds on `tower::Service`. The core is intended to be transport independent and testable with in-memory services. HTTP adapters and deployment integrations can be added later, behind real dependency boundaries. Netplane is not a standalone HTTP proxy or a replacement async runtime.
 
-## Overview
+The design contract is in [docs/architecture.md](docs/architecture.md), with decisions recorded in [docs/adr](docs/adr). They distinguish current behavior from future requirements.
 
-![Overview](.template/overview.svg)
+## Get started
 
-This template is designed for Rust developers who want to start new projects with best practices baked in. It provides a modular workspace structure, comprehensive quality gates, and built-in support for AI-assisted development.
-
-## Features
-
-- **Rust 2024 Edition:** Leverages the latest language features and idioms with an MSRV of 1.88.
-- **Workspace Layout:** Clean separation of concerns with a `crates/` directory for internal libraries and applications.
-- **Security First:** Pre-configured supply chain audits, secret scanning, and hardened configuration patterns.
-- **Performance Optimized:** Optimized dev profiles with reduced debug artifacts and disk space savings.
-- **AI-Native:** First-class support for AI coding agents with specialized skills and canonical instruction sets. Includes `llms.txt` for machine-readable project context.
-
-## Example
-
-```rust,no_run
-
-let result = add(2, 3);
-assert_eq!(result, 5);
-```
-
-<!-- cargo-sync-readme end -->
-
-## Documentation Map
-
-This repository uses a layered documentation strategy to serve both human developers and AI agents:
-
-| Layer | File / Directory | Audience | Purpose |
-|-------|------------------|----------|---------|
-| **Human Onboarding** | `README.md`, `QUICKSTART.md` | Humans | High-level project overview and setup |
-| **Agent Contract** | `AGENTS.md` | AI Agents | Canonical rules and project contract (SSOT) |
-| **Reusable Procedures** | `.agents/skills/` | AI Agents | Step-by-step executable task knowledge |
-| **Tool Adapters** | `CLAUDE.md`, `GEMINI.md`, etc. | Specific Tools | Tool-specific deltas and harness quirks |
-
-### AI Editor Integration
-
-| Editor / Agent | Config Location | Included |
-|---|---|---|
-| Claude Code | `.claude/` | ✅ |
-| Gemini CLI | `.gemini/` | ✅ |
-| Qwen | `.qwen/` | ✅ |
-| OpenCode | `.opencode/` | ✅ |
-| Windsurf | `.windsurf/` | ✅ |
-
-## Included Tooling
-
-- **Testing:** `cargo-nextest` for faster test execution and `proptest` for property-based testing.
-- **Quality Assurance:** `cargo-mutants` for mutation testing and `clippy` with a zero-warnings policy. The template includes a pre-configured workspace-level lint suite that prevents common pitfalls like `unwrap()` in library code.
-- **CI/CD:** Multi-stage GitHub Actions for linting, testing, security audits, and automated releases.
-- **Local Workflows:** Helper scripts for running the entire quality gate pipeline locally.
-
-## Quick Start
-
-1. **Use this Template:** Click the **"Use this template"** button on GitHub.
-2. **Setup:** Follow the detailed instructions in **[QUICKSTART.md](QUICKSTART.md)**.
-3. **Customize:** Rename the placeholder crates and update `Cargo.toml` metadata.
-4. **Develop:** Use `./scripts/quality-gates.sh` to ensure your changes meet the project's quality standards.
-
-## Repository Structure
-
-```text
-.
-├── .agents/             # AI agent specialized skills and workflow definitions
-│   ├── context/         # Cross-repo context for derived repositories
-│   └── skills/          # Executable task knowledge and canonical workflows
-├── .cargo/              # Cargo configuration (linker, profiles, aliases)
-├── .github/             # GitHub Actions workflows and issue templates
-├── agents-docs/         # Detailed documentation for AI agents
-├── benchmarks/          # Criterion benchmark suites
-├── config/              # Profile-based runtime configuration
-│   └── profiles/        # Environment-specific JSON configs (default.json, etc.)
-├── crates/              # Workspace member crates
-│   ├── actor-runtime-template/
-│   ├── checkpoint-template/
-│   ├── example-crate/   # Placeholder library crate
-│   ├── example-registry-pattern/
-│   ├── example-storage-pattern/
-│   ├── hybrid-storage-template/
-│   ├── mcp-server-template/
-│   ├── sample-app/      # Reference application implementing best practices
-│   └── xtask/           # Cargo task runner
-├── docs/                # mdbook documentation and architecture guides
-├── examples/            # Example usage of workspace crates
-│   └── hello_world/     # Simple hello world example
-├── fuzz/                # cargo-fuzz testing scaffold
-├── hooks/               # Git hooks (session-start.sh, etc.)
-├── reports/             # Generated HTML review and analysis output (ignored)
-├── schema/              # JSON Schema definitions for config/API contracts
-├── scripts/             # Automation scripts for quality gates and releases
-├── AGENTS.md            # Canonical instructions for AI coding agents
-├── llms.txt             # LLM context file (machine-readable project overview)
-├── Cargo.toml           # Workspace manifest
-└── QUICKSTART.md        # Comprehensive setup guide
-```
-
-## CI/CD and Quality Gates
-
-The project enforces high standards through a multi-layered verification process:
-
-- **CI Pipeline:** Automatically runs formatting checks, Clippy lints, tests, security audits (`cargo-audit`), supply chain checks (`cargo-deny`), benchmarks compile-check, and VERSION consistency checks on every PR.
-- **Local Gates:** Run `./scripts/quality-gates.sh` before committing to mirror the CI checks locally.
-- **Mutation Testing:** Periodic runs of `cargo-mutants` verify that your tests actually catch bugs.
-
-## GitHub Hardening
-
-This template includes guidance for securing harness files, hooks, workflow definitions, and related governance files on GitHub. The guidance covers optional protections for sensitive paths, CODEOWNERS patterns, branch configuration, and security features.
-
-See [docs/github-hardening.md](docs/github-hardening.md) for the full guide.
-
-## Feature Flags
-
-The root package has no optional features (it only exports a tiny example API).
-Real feature flags live on member crates that implement them, for example:
-
-| Crate | Feature | Description |
-|-------|---------|-------------|
-| `example-storage-pattern` | `sqlite` / `mock` | **Preferred** trait-only storage pattern |
-| `hybrid-storage-template` | (none / `MemoryBackend`) | Working in-memory hybrid wrapper |
-| `hybrid-storage-template` | `sqlite` | Fail-closed SQLite **stub** (not production) |
-| `hybrid-storage-template` | `kv` | redb key-value backend |
-
-Pattern selection: [docs/patterns/README.md](docs/patterns/README.md).
-
-## Project Profiles
-
-Choose a validated blueprint from `config/template-profiles/` that shapes the generated
-workspace: which crates stay, which workflows run, the default CI tier, and lockfile policy.
-
-| Profile | Best for | Keeps | Lockfile Policy |
-|---|---|---|---|
-| `minimal` | Small app | `sample-app` + renamed lib crate + `xtask`; drops pattern crates, benchmarks, fuzz, heavy workflows | Committed (`Cargo.lock` tracked) |
-| `library` | Reusable library | renamed lib crate + `xtask` + workspace tests | Ignored (library standard) |
-| `cli` | Binary tool | `sample-app` + renamed lib crate + `xtask` + tests | Committed (`Cargo.lock` tracked) |
-| `service` | Long-running service | actor/storage/registry patterns + `xtask` | Committed (`Cargo.lock` tracked) |
-| `workspace` | Full reference | every crate, benchmark, and workflow | Committed (`Cargo.lock` tracked) |
-| `ai-agent` | Agent-centric dev | `sample-app` + lib crate + `xtask` + agent tooling | Committed (`Cargo.lock` tracked) |
+The repository pins Rust 1.88 in `rust-toolchain.toml`. See [QUICKSTART.md](QUICKSTART.md) for setup and verification commands.
 
 ```bash
-./scripts/init-template.sh --profile library --name my-lib
-# equivalent xtask commands
-cargo run -p xtask --bin xtask -- template init --profile minimal --name my-app
-cargo run -p xtask --bin xtask -- template validate-profile --profile config/template-profiles/library.toml
-cargo run -p xtask --bin xtask -- template inspect --profile service
+cargo build --workspace
+cargo test --workspace
 ```
 
-`--minimal` remains a shorthand for `--profile minimal`. Full detail:
-[docs/template-profiles.md](docs/template-profiles.md).
+The workspace contains `crates/netplane` (the public library) and `crates/xtask` (development tooling). Dependencies are added only when used. `Cargo.lock` is ignored for this library workspace.
 
-## Benchmarks
+## Contribute
 
-The template provides a dedicated `benchmarks/` workspace crate with Criterion benchmark suites (`end_to_end`, `memory_usage`).
-
-See **[QUICKSTART.md](QUICKSTART.md)** for detailed benchmark and performance testing instructions.
-
-## Fuzz Testing
-
-A fuzz testing scaffold is included using `cargo-fuzz`. The fuzzer runs weekly via GitHub Actions.
-
-See the **Advanced Testing** section in **[QUICKSTART.md](QUICKSTART.md)** for local usage instructions.
-
-## AI Assistant Context Files
-
-This template ships structured context files for AI coding assistants. These files help agents understand the project structure and rules quickly.
-
-- **`llms.txt`**: Condensed project overview for token-efficient LLM context.
-- **`llms-full.txt`**: Complete source context for deep analysis (auto-generated).
-
-See **[AGENTS.md](AGENTS.md)** for instructions on maintaining and using these context files.
-
-## Output Artifacts
-
-The project uses several directories for generated artifacts and documentation:
-
-- **`reports/`**: Standardized directory for generated HTML reports (coverage, audit, benchmarks). This directory is git-ignored by default.
-- **`.agents/ci/`**: CI health status artifacts (ci-status.json, ci-summary.md).
-- **`target/`**: Rust build artifacts.
-
-## VERSION File
-
-A `VERSION` file at the repo root serves as a plain-text single source of truth for tooling that can't easily parse TOML.
-
-> **Versioning note:** `VERSION` is the generated project starter version; `.template/CHANGELOG-TEMPLATE.md` is internal to the template - see #135.
-
-```bash
-VERSION=$(cat VERSION)
-echo "Building version $VERSION"
-```
-
-The CI pipeline verifies `VERSION` content matches `Cargo.toml` on every push to main.
-
-## Cargo.lock Policy
-
-The template repository itself does **not** commit `Cargo.lock` by default because it acts as a template for library and application crates alike. Downstream lockfile handling is determined by template initialization profiles:
-
-- **Binary Application Profiles** (`cli`, `service`, `ai-agent`, `minimal`, `workspace`): `cargo xtask template init` automatically un-ignores and tracks `Cargo.lock` in `.gitignore` so generated binary projects commit `Cargo.lock` for reproducible builds by default.
-- **Library Profile** (`library`): Keeps `Cargo.lock` ignored in `.gitignore`, adhering to Cargo recommendations for library crates so downstream consumers resolve exact dependency versions via `cargo update`.
-
-See the [Cargo docs on Cargo.lock](https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html) for full rationale.
-
-## Customization Guidance
-
-To adapt this template to your needs:
-
-- **Renaming Crates:** Search and replace `example-crate` and `sample-app` with your desired crate names.
-- **Adjusting Lints:** Modify `.clippy.toml` or crate-level attributes if you need to diverge from the default pedantic lint set.
-- **Security Policy:** Review `deny.toml` to customize allowed licenses and dependency bans.
-
-## Maintenance
-
-Contributions are welcome! Please refer to **[CONTRIBUTING.md](CONTRIBUTING.md)** for guidelines on how to propose changes or report issues. Security vulnerabilities should be reported according to the process in **[SECURITY.md](SECURITY.md)**.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before changing the architecture or public API. Report vulnerabilities through [the security policy](SECURITY.md). Netplane is licensed under [MIT](LICENSE).
 
 
 
@@ -320,134 +117,51 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 # Source: AGENTS.md
 ================================================================================
 
-# Agent Coding Contract
+# Netplane agent coding contract
 
-> **2026 Best Practice Rust Template** - This is the single canonical instruction file for all AI agents.
-> Tool-specific files (`CLAUDE.md`, `GEMINI.md`, etc.) are thin adapters that point here.
+Netplane is a reusable Rust library for dynamically reconfigurable Tower service graphs. The current crate is a scaffold: do not describe graph execution, hot replacement, or lifecycle guarantees as implemented. Read [docs/architecture.md](docs/architecture.md) and the decisions in `docs/adr/` before changing the public API.
 
-## Quick Reference
+## Workspace
 
-| Task | Command |
-|------|----------|
-| Build | `cargo build --workspace` |
-| Quality | `./scripts/quality-gates.sh` |
-| Tests | `cargo nextest run --workspace` |
-| Setup | `./scripts/bootstrap.sh` |
-| Diagnostics | `./scripts/doctor.sh` |
+| Path | Responsibility |
+| --- | --- |
+| `crates/netplane` | Public library and future transport-independent graph runtime. |
+| `crates/xtask` | Development automation; never a runtime dependency of the library. |
+| `docs/architecture.md`, `docs/adr/` | Design requirements and accepted decisions. |
 
-## Project Structure
+Add crates only when a concrete dependency boundary emerges. Keep transport and deployment adapters outside the core. Add dependencies when they have consumers, use workspace versions, and minimize dependencies exposed by the public API.
 
-- `.agents/skills/`: Executable task knowledge and canonical workflows.
-- `.agents/skills/harness/`: Harness engineering — sensor response protocol and self-correction.
-- `crates/`: Workspace members (libraries and applications).
-- `scripts/`: Development, quality, and release automation.
-- `plans/adr/`: Architecture Decision Records.
-- `.githooks/`: Pre-commit quality enforcement.
-- `AGENTS.md`: THIS FILE (Canonical Project Contract).
+## Design rules
 
-## Agent Skills (.agents/skills/)
+- Interoperate with `tower::Service` and preserve readiness semantics. Avoid a competing service abstraction without a demonstrated need.
+- Keep readiness and dispatch for each request on the same service instance and graph version, including across publication.
+- Validate a replacement graph before publishing it. Treat published graph versions as immutable.
+- Make ownership and request lifetime explicit so in-flight requests keep required resources through completion or cancellation.
+- Bound concurrency, queues, and task creation. Never hide overload with unbounded spawning.
+- Keep locks out of `.await` spans. Use `tokio` only when runtime work needs it; offload blocking or long CPU work appropriately.
+- Make cancellation, timeout, and shutdown cleanup observable and testable.
+- Test core behavior with mock services, without sockets. Cover graph lifetime, readiness, backpressure, and concurrency as those features are implemented.
+- Do not implement HTTP listeners, Kubernetes integration, or cloud deployment as part of the initial graph runtime.
 
-The skills index is **auto-generated** from skill frontmatter. Do not edit the table below manually.
+## Rust and API conventions
 
-**Regenerate after adding/modifying skills:**
+- Rust 2024, MSRV 1.88. Do not raise the MSRV without a dependency or feature requirement.
+- Forbid unsafe code in the library. Use typed errors when needed; avoid `unwrap` and `expect` in production library code.
+- Document every public item, including error and cancellation behavior. Prefer a small stable surface; keep implementation details private.
+- Add or update meaningful tests before changing behavior. Inspect snapshot diffs before accepting them.
+- Follow workspace lint settings. A justified lint exception belongs in the crate manifest with its reason.
+- Keep source files under 500 lines. Do not put secrets or personal contact data in source or docs.
+- `VERSION` and workspace version remain `0.0.0` until a deliberate release decision. The library is not currently published.
 
-```bash
-bash scripts/generate-skills-md.sh
-```
+## Workflow
 
-<!-- AUTO-GENERATED: see .agents/SKILLS.md for full table -->
-Consult `.agents/SKILLS.md` for the complete skills index, or read individual skill docs at `.agents/skills/<name>/SKILL.md`.
+1. Check `git status`, nearby code, the architecture documents, and the current `.github/workflows/ci.yml` before editing.
+2. Identify affected behavior and tests. Add tests first when changing logic.
+3. Run focused checks. Use `./scripts/quality-gates.sh` when its optional tools are installed and its repository scan can run in the local environment. At minimum, run format, Clippy, build, and tests for code changes.
+4. Update documentation when architecture or public behavior changes. Run `bash scripts/generate-llms-txt.sh` after significant architecture changes.
+5. Use lowercase Conventional Commit subjects if asked to commit.
 
-## Multi-Agent Support
-
-Skill symlinks are managed automatically. After cloning, run:
-
-```bash
-./scripts/bootstrap.sh    # One-command setup
-./scripts/doctor.sh        # Environment diagnostics
-```
-
-CLI-specific directories read from `.agents/skills/` via symlinks:
-- `.claude/skills/` → Claude Code
-- `.qwen/skills/` → Qwen Code
-- `.gemini/`, `.opencode/`, `.windsurf/` → Read directly
-
-## Session Bootstrap
-
-The repository includes a `SessionStart` hook to auto-inject project context at the start of an agent session. This helps agents orient themselves quickly without manual discovery.
-
-- **Hook:** `hooks/session-start.sh`
-- **Config:** `docflow.json`
-- **Integration:** Registered in `.claude/settings.json` for Claude.
-
-## Cross-Repo Context
-
-Derived repositories should check `.agents/context/` for shared conventions and related repository links.
-
-- **`.agents/context/external-repos.json`**: Links to related repos and their agent context URLs
-- **`.agents/context/shared-conventions.md`**: Cross-repo coding conventions (commit format, branch naming, PR requirements)
-
-**Merge precedence**: Local repo instructions > imported context > template defaults.
-
-## Coding Conventions
-
-### Rust & Concurrency
-- **Edition:** Rust 2024 (MSRV 1.88). Edition 2024 requires ≥1.85; 1.88 is intentional for broader codespace/toolchain compatibility. Do not bump MSRV unless required by a dependency. https://doc.rust-lang.org/edition-guide/rust-2024/index.html
-- **Versions:** `VERSION` / workspace `0.0.0` is the **adopter app** version (start here). Template meta-releases (e.g. v0.3.x) live only in `.template/CHANGELOG-TEMPLATE.md` — do not sync them into `VERSION`.
-- **Safety:** `#![forbid(unsafe_code)]` at workspace and crate roots.
-- **Errors:** `thiserror` for libraries, `anyhow` for binaries. No `unwrap()` in libs.
-- **Async:** Use `tokio` when you need a runtime. CLI apps that use async: prefer `#[tokio::main(flavor = "current_thread")]`. Sync `main` is fine when no async is required (`sample-app`).
-- **Async Safety & Execution:** Choose execution models based on workload characteristics: keep short bounded CPU work on Tokio worker threads, offload genuinely blocking operations or long CPU work to `spawn_blocking` or dedicated worker pools, default to bounded concurrency/channels for backpressure, and keep lock scopes minimal (never across `.await`). Reference `.agents/skills/tokio-performance/SKILL.md` for Tokio architecture choices.
-- **Tracing:** Minimize CLI tracing metadata (thread IDs/names) unless high-concurrency.
-- **Quality SSOT:** Prefer `./scripts/quality-gates.sh` before push. `cargo run -p xtask quality-gates` delegates to that script.
-- **Verification tiers:** Which checks run for each lifecycle trigger (pull request / protected branch / scheduled / release) is configured in `config/xtask.json` (`tiers` map: `pull-request`, `protected-branch`, `scheduled`, `release`) — not in workflow YAML. Override per run via `xtask quality run --tier <name>` or `$XTASK_TIER`. Legacy names `fast-pr` and `full-gate`/`all` are aliases for `pull-request` and `protected-branch`.
-- **When-changed check selection:** `xtask quality run --changed-from <ref>` uses declarative `when_changed` glob mappings in `config/xtask.json` (e.g. `crates/**/*.rs` -> Rust checks, `scripts/**/*.sh` -> ShellCheck). Use `xtask quality explain --changed-from <ref>` to inspect selected vs skipped checks and matched patterns. Unreadable git state fails closed by selecting all checks and recording `fallback_used: true`.
-
-### Security & Configuration
-- **Hardening:** Enforce `#[serde(deny_unknown_fields)]` on config structs.
-- **Safe Loading:** Use `file.take(limit)` and `is_file()` check before reading.
-- **Validation:** Sanitize strings (`is_control()`) and enforce bounds on numeric fields.
-- **Dependencies:** Declare versions in `[workspace.dependencies]` with caret ranges (e.g. `"1"` ≡ `^1`). Library/template crates should ignore `Cargo.lock` (rely on `Cargo.toml` constraints); binary applications should commit it for reproducible builds. Audit with `cargo tree` and `deny.toml`. Prefer lockfile pins over exact `=` requirements in manifests. https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
-- **Secrets:** Never hardcode; use environment variables or `.env`.
-- **Template Portability:** Never hardcode project name, repo URL, or author across source files. All project-specific values must derive from `Cargo.toml` at runtime or be rewriteable via `scripts/init-template.sh`. Avoid magic number thresholds — define named constants.
-
-### Quality & Workflow
-- **File Size:** Max 500 LOC per source file.
-- **Docs:** All public items must have `///` doc comments.
-- **TDD:** Add or update tests before implementing logic.
-- **Snapshots:** Treat snapshot changes as behavior changes. Inspect them with `cargo insta review` and accept only intentional, deterministic output changes; never update snapshots just to clear a failing test.
-- **Search:** Always use `--exclude-dir=target` (and `.git`) in search commands.
-- **Context:** Run `bash scripts/generate-llms-txt.sh` after significant arch changes.
-- **Commits:** Strictly use lowercase for the subject line (e.g., `fix(scope): add ...` not `fix(scope): Add ...`). Sentence-case or start-case will fail CI.
-
-## Change Workflow
-
-1. **Discover:** Read code patterns, module structure, and `.agents/ci/ci-summary.md`.
-2. **Plan:** Identify affected files and required test coverage.
-3. **Test-First:** Add or update tests before logic implementation.
-4. **Implement:** Write code adhering to conventions.
-5. **Quality Check:** Run `./scripts/quality-gates.sh`.
-6. **Commit:** Use conventional commit format.
-
-### Stacked PRs (Optional)
-
-For large features with 3+ distinct concerns, stacked PRs are available via `gh stack`.
-This is OPTIONAL — default to single-PR atomic commits. See `.agents/skills/stacked-prs/SKILL.md`.
-Requires GitHub and `gh` CLI. Install: `gh extension install github/gh-stack`
-
-## Agentic Metrics Reporting
-
-After completing any task, write a JSON event file to `.agents/events/YYYY/MM/DD/`.
-This event-based pattern is also used for CI benchmarks in `benchmarks/events/` to prevent merge conflicts.
-See `.agents/skills/metrics-reporter/` for the schema and event writing procedures.
-Set `human_interventions > 0` if a human corrected your code or provided rework instructions.
-
-## Release Failures (Priority 1)
-
-If a `release-failure` issue is open:
-1. Create a `hotfix/` branch and apply the minimal fix.
-2. Open a PR with the `hotfix` label.
-3. Close the issue with: `Recovered at: <TIMESTAMP>. FDRT: <HOURS>`.
+Use `rg` for repository searches and exclude `.git` and `target`. Repository skills in `.agents/skills/` contain detailed procedures, but this file is the project contract.
 
 
 
@@ -455,177 +169,32 @@ If a `release-failure` issue is open:
 # Source: CONTRIBUTING.md
 ================================================================================
 
-# Contributing to rust-2026-template
+# Contributing to Netplane
 
-Thank you for considering contributing! This is a generic Rust project template.
+Netplane is an early stage Rust library. The public graph API is not yet established. Before proposing one, read [the architecture](docs/architecture.md) and [ADRs](docs/adr/), and explain how the change preserves Tower readiness, bounded resources, request lifetime, and transport independence.
 
-## Quick Links
+## Set up
 
-- [Issues](https://github.com/d-oit/rust-2026-template/issues)
-- [Pull Requests](https://github.com/d-oit/rust-2026-template/pulls)
-- [Security Policy](SECURITY.md)
-
-## Development Setup
-
-### Prerequisites
-
-- Rust stable (see `rust-toolchain.toml` for exact version)
-- `cargo-nextest` — `cargo install cargo-nextest`
-- `cargo-deny` — `cargo install cargo-deny`
-- `cargo-audit` — `cargo install cargo-audit`
-
-### Clone and Build
+Follow [QUICKSTART.md](QUICKSTART.md) for the pinned toolchain and local commands. The workspace contains `crates/netplane` and development tooling in `crates/xtask`.
 
 ```bash
-git clone https://github.com/d-oit/rust-2026-template.git
-cd rust-2026-template
-cargo build
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo build --workspace
+cargo test --workspace
 ```
 
-### Run Quality Gates Locally
+Run `./scripts/quality-gates.sh` before submitting when the required local tools are installed. The current library is a scaffold, so tests for future runtime behavior should be added alongside the implementation, not as claims of existing behavior.
 
-Always run before pushing:
+## Changes and review
 
-```bash
-bash scripts/quality-gates.sh
-```
+Open an [issue](https://github.com/janagor/netplane/issues) for a substantial API or architecture change, or submit a draft pull request with a small prototype. Keep changes focused and document ownership, cancellation, readiness, and error behavior for new public APIs. Add tests for graph version lifetime, concurrent publication, and resource bounds when those mechanisms are introduced. Keep transport adapters separate from the core.
 
-This runs: `cargo fmt --check`, `cargo clippy`, `cargo build`, `cargo nextest run`, `cargo test --doc`, `cargo audit`, `cargo deny check`, unused deps (cargo-machete), MSRV audit, shellcheck, markdownlint, privacy scan.
+Use lowercase [Conventional Commit](https://www.conventionalcommits.org/) subjects, such as `docs: establish netplane architecture`. Update documentation for changed behavior and record durable design decisions in `docs/adr/`. Pull requests should include the verification commands run and any relevant limitations.
 
-## Making Changes
+Netplane remains at version `0.0.0` and `crates/netplane` has `publish = false`. Publishing and compatibility policy will be decided before the first usable release. Do not trigger a release as part of an ordinary contribution.
 
-### Branch Naming
-
-| Type | Pattern | Example |
-|---|---|---|
-| Feature | `feat/description` | `feat/add-async-support` |
-| Bug fix | `fix/description` | `fix/clippy-warnings` |
-| Docs | `docs/description` | `docs/update-readme` |
-| Refactor | `refactor/description` | `refactor/workspace-layout` |
-
-### Commit Messages
-
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-feat(crate-name): add feature X
-fix: resolve clippy warning in lib.rs
-docs: update AGENTS.md with new skill
-chore(deps): bump serde from 1.0.195 to 1.0.196
-```
-
-### Code Style
-
-- Format: `cargo fmt` (enforced by CI)
-- Lint: `cargo clippy -- -D warnings` (zero warnings policy)
-- Shell Lint: `shellcheck` for all scripts in `scripts/` (enforced by CI)
-- Edition: Rust 2024
-- MSRV: 1.88 (see `rust-toolchain.toml`)
-
-### Tests
-
-- Use `cargo nextest run` for all tests
-- Unit tests live in `#[cfg(test)]` modules in source files
-- Integration tests live in `crates/<name>/tests/`
-- All public items must have doc tests or unit tests
-
-## Pull Request Process
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Make changes and run quality gates
-4. Commit using Conventional Commits format
-5. Push and open a PR against `main`
-6. Wait for CI to pass (all green required)
-7. Request review
-
-### PR Checklist
-
-- [ ] `cargo fmt --check` passes
-- [ ] `cargo clippy -- -D warnings` passes
-- [ ] `cargo nextest run` passes
-- [ ] `cargo audit` shows no vulnerabilities
-- [ ] `cargo deny check` passes
-- [ ] Coverage targets met (as defined in `.codecov.yml`)
-- [ ] Documentation updated if API changed
-- [ ] `CHANGELOG.md` updated
-- [ ] `shellcheck` passes for all shell scripts
-
-## Lint Policy
-
-Workspace-level lints (`Cargo.toml`) set the **default** for all crates.
-Individual crates may relax specific lints in their own `[lints.clippy]`
-section when there is a documented reason. Never use `#[allow(...)]`
-attributes in source code — this is enforced by `allow_attributes = "deny"`.
-
-## Release Process
-
-We use `cargo-release` for version management and `cargo-dist` for artifact generation.
-
-### Cutting a Release
-
-1. Ensure you are on the `main` branch and it's up to date.
-2. Run `cargo release <patch|minor|major>` to prepare the release.
-    - This will run quality gates (via `scripts/pre-release-hook.sh`), bump versions, update the changelog (via `git-cliff`), and create a tag.
-3. Push the tag to trigger the GitHub Actions release workflow.
-
-```bash
-cargo release patch --execute
-git push --tags
-```
-
-## Template-Specific Guidance
-
-This is a **generic Rust template**, not a standalone application. Changes should:
-
-- Remain generic and reusable for any Rust project
-- Not add application-specific logic
-- Keep the `example-crate` as a minimal, illustrative placeholder
-- Be documented in `CHANGELOG.md`
-
-### Cross-Repo Context
-
-If your organization uses this template across multiple repos, configure `.agents/context/` to share conventions and skill sources:
-
-- `external-repos.json` — Links to related repositories for agent discovery
-- `shared-conventions.md` — Cross-repo coding standards (commits, branches, quality)
-
-Agents in derived repos automatically apply these shared conventions. See `QUICKSTART.md` for setup instructions.
-
-### Publishing to crates.io
-
-Every publishable crate **must** define an `include` whitelist in its `Cargo.toml`
-to prevent internal files (plans, agent docs, scripts, CI config) from ending up in
-the published package. The template already sets this up via `[workspace.package]`:
-
-```toml
-include = ["/src", "README.md", "LICENSE"]
-```
-
-When you create a new crate, verify the publish surface is correct (pass `--allow-dirty` for local iteration before committing):
-
-```bash
-cargo package --list -p your-crate --allow-dirty
-```
-
-#### Multi-Crate Workspace Publish Order
-
-In a multi-crate workspace where crates depend on each other via versioned path dependencies (e.g., `core = { path = "../core", version = "0.1.0" }`), cargo requires dependencies to exist on `crates.io` before dependent crates can be published or dry-run validated.
-
-- **Topological Order**: Crates must be published bottom-up in dependency graph order (leaf dependencies first, non-leaf dependents last).
-- **Dry-Run Behavior**: Running `cargo publish --dry-run` or `cargo package` on a non-leaf crate will fail until its internal path dependencies are published to `crates.io`. Pre-publish verification for non-leaf crates prior to publishing dependencies should check package file listings (`cargo package --list`) and manifest metadata.
-- **Publishing Tooling**: Use `cargo release --workspace` or `scripts/release-manager.sh` to handle workspace versioning and publish dependency ordering automatically.
-
-The output should **not** contain `plans/`, `agents-docs/`, `scripts/`, `.github/`,
-`.agents/`, or `.opencode/`. See
-[Cargo manifest include field](https://doc.rust-lang.org/cargo/reference/manifest.html#the-include-and-exclude-fields)
-for details.
-
-## Reporting Issues
-
-Open an issue at: <https://github.com/d-oit/rust-2026-template/issues>
-
-For security vulnerabilities, see [SECURITY.md](SECURITY.md).
+Report vulnerabilities privately through [the security policy](SECURITY.md), not a public issue.
 
 
 
@@ -633,244 +202,42 @@ For security vulnerabilities, see [SECURITY.md](SECURITY.md).
 # Source: QUICKSTART.md
 ================================================================================
 
-# Quick Start — rust-2026-template
+# Quick start
 
-Get a new Rust project running in under 5 minutes.
-
-> **⚠️ First-Time Setup Required**
-> Before building or publishing, run `init-template.sh` to replace placeholder values
-> (`Your Name`, `your-org/your-repo`, `your-crate`) with your project metadata.
-> CI will show a warning if placeholders are still present (template repo intentionally has them).
+Netplane is a Rust library workspace. Its library crate provides bounded Tower service endpoints and atomic publication of immutable execution versions.
 
 ## Prerequisites
 
-- Rust stable via [rustup](https://rustup.rs/) — toolchain pinned to 1.88 in `rust-toolchain.toml`
-- Git 2.30+
-- Optional: `cargo-nextest`, `cargo-deny`, `cargo-audit` for full quality gates
+- Rust via [rustup](https://rustup.rs/); `rust-toolchain.toml` selects 1.88 with rustfmt and Clippy.
+- Git for cloning the repository.
+- Optional: `cargo-nextest` and the tools used by the full quality gate script.
 
-## 1. Create Your Project from the Template
-
-1. Click **"Use this template"** on GitHub
-2. Name your repository and create it
-3. Clone it locally:
+## Build and verify
 
 ```bash
-git clone https://github.com/YOUR_USER/YOUR_REPO.git
-cd YOUR_REPO
-```
-
-### Recommended: use a project profile (most apps)
-
-```bash
-./scripts/init-template.sh --profile minimal \
-  --name your-crate-name \
-  --description "Your description" \
-  --author "Your Name" \
-  --repo YOUR_USER/YOUR_REPO
-```
-
-Profiles are validated blueprints in `config/template-profiles/` (issue #286):
-`minimal`, `library`, `cli`, `service`, `workspace`, `ai-agent` choose which crates,
-workflows, and CI-tier default the generated project keeps. `--minimal` is shorthand
-for `--profile minimal` (keeps `sample-app` + your renamed lib crate + `xtask`; drops
-optional pattern crates and heavy workflows). See
-[docs/template-profiles.md](docs/template-profiles.md) for the selection table.
-
-**Versions:** leave `VERSION` / workspace version at `0.0.0` until you ship.
-Template release notes (`v0.3.x`) are only in `.template/CHANGELOG-TEMPLATE.md`.
-
-## 2. Rename the Example Crate (manual alternative)
-
-If you skip `init-template.sh`, rename `example-crate` yourself:
-
-```bash
-# Check the name is available on crates.io first
-cargo search your-crate-name
-# If no exact match: available!
-
-# Rename directory and update Cargo.toml
-mv crates/example-crate crates/your-crate-name
-# Edit crates/your-crate-name/Cargo.toml
-# Change: name = "example-crate" -> name = "your-crate-name"
-```
-
-See `.agents/skills/crates-io-name-check/SKILL.md` for the full name-check workflow.
-
-The `sample-app` binary crate can be kept as a reference or renamed/removed as needed.
-Pattern crates: see [docs/patterns/README.md](docs/patterns/README.md).
-
-## 3. Install Required Tools
-
-```bash
-# Required for tests
-cargo install cargo-nextest
-cargo install cargo-llvm-cov
-
-# Required for CI (supply chain checks)
-cargo install cargo-deny
-cargo install cargo-audit
-```
-
-## 4. Build and Test
-
-```bash
-# Build all workspace crates
+git clone https://github.com/janagor/netplane.git
+cd netplane
+cargo metadata --no-deps
+cargo fmt --all -- --check
 cargo build --workspace
-
-# Run all tests
-cargo nextest run --workspace
-
-# Run the sample app
-cargo run -p sample-app
-cargo run -p sample-app -- --count 5 --verbose
-
-# Use fast-dev profile for faster local iterations
-# (Disables debug symbols and optimizes build scripts)
-cargo build --profile fast-dev
-cargo nextest run --profile fast-dev
+cargo test --workspace
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-## 5. Run All Quality Gates
+`cargo test --workspace` includes documentation tests. If `cargo-nextest` is installed, use `cargo nextest run --workspace` for the test suite. Run `./scripts/quality-gates.sh` for the repository's broader local checks; it may require additional tools reported by the script.
 
-```bash
-bash scripts/quality-gates.sh
-```
+Nix users can enter `nix develop`, then run the same Cargo commands. Toolchain consistency between the Nix shell and `rust-toolchain.toml` is part of the separate environment and CI work.
 
-Runs checks including pedantic and nursery clippy lints by default: format, clippy, build, tests, doc tests, security audit, cargo-deny, unused deps, privacy scan, secret scan.
+## Where to work
 
-Pass `--fix` to auto-correct formatting and clippy issues:
+- `crates/netplane`: public library code with bounded execution and version publication.
+- `crates/xtask`: repository automation, not a runtime dependency.
+- `docs/architecture.md` and `docs/adr/`: design contract and decisions.
+- `AGENTS.md`: coding and review instructions.
 
-```bash
-bash scripts/quality-gates.sh --fix
-```
+Read [the architecture](docs/architecture.md) before changing graph types or adding transport adapters. Add a dependency only with its first consumer. Keep the core independent of sockets, Hyper, Kubernetes, and specific deployment environments.
 
-## 6. Update Project Metadata
-
-Edit these files with your project details:
-
-| File | What to update |
-|---|---|
-| `Cargo.toml` | `authors`, `repository`, `homepage`, `documentation` |
-| `crates/*/Cargo.toml` | `name`, `description` |
-| `AGENTS.md` | Project name, description, domain context |
-| `CLAUDE.md` | Project-specific overrides |
-| `config/profiles/default.json` | Application configuration defaults |
-| `schema/config.schema.json` | JSON Schema for configuration validation |
-| `README.md` | Replace template content with your project |
-| `CODECOV_TOKEN` | Add to GitHub Actions secrets for coverage reporting |
-| `SECURITY.md` | Your security contact / advisory link |
-| `CONTRIBUTING.md` | Your contribution process |
-
-## 7. Push and Watch CI Pass
-
-```bash
-git add -A
-git commit -m "feat: initialize project from rust-2026-template"
-git push origin main
-```
-
-CI runs: format check, clippy, nextest, doc tests, security audit, cargo-deny, MSRV check.
-
-## Cutting a Release
-
-1. Ensure your working tree is clean.
-2. Run: `cargo release --workspace patch` (or `minor` / `major`)
-   - This bumps all workspace member versions together.
-   - Tags the commit as `v<version>`.
-   - Pushes the tag, triggering the release CI workflow.
-3. The GitHub Actions release workflow will:
-   - Run `git-cliff` to update `CHANGELOG.md`
-   - Create a GitHub Release with the generated notes
-
-For a dry-run (no changes): `cargo release --workspace patch --dry-run`
-
----
-
-## What You Get
-
-| Component | Location | Purpose |
-|---|---|---|
-| CI pipeline | `.github/workflows/ci.yml` | Format, lint, test, audit on every push |
-| Release workflow | `.github/workflows/release.yml` | Tag-triggered release with cargo-dist |
-| Agent skills | `.agents/skills/` | AI coding assistant skill runbooks |
-| Quality gate script | `scripts/quality-gates.sh` | Local pre-push checks |
-| Code quality script | `scripts/code-quality.sh` | fmt \| clippy \| audit \| check \| fix |
-| Release manager | `scripts/release-manager.sh` | validate \| prepare \| publish |
-| ADR template | `plans/adr/` | Architecture decision records |
-| Clippy config | `.clippy.toml` | Pedantic and nursery lint rules |
-| Deny config | `deny.toml` | License and vulnerability policy |
-| Nextest config | `.config/nextest.toml` | Test profiles (default + ci) |
-| Codecov config | `.codecov.yml` | Coverage gate enforcement targets |
-| Cargo aliases | `.cargo/config.toml` | `check-all`, `test-all`, `lint`, etc. |
-
-## Advanced Testing
-
-### Mutation Testing
-
-The template includes `cargo-mutants` for verifying that your tests actually catch bugs. Mutation testing injects small code changes (mutants) and checks if your test suite detects them.
-
-```bash
-# Install cargo-mutants
-cargo install cargo-mutants
-
-# Run mutation tests (takes several minutes)
-cargo mutants --workspace
-
-# Run against a specific file
-cargo mutants --file src/lib.rs
-
-# Filter by pattern
-cargo mutants -m "if.*None"
-```
-
-**Understanding results:**
-- **Caught** — Your tests detected the mutation (good!)
-- **Survived** — The mutation wasn't detected (tests need improvement)
-- **Timeout** — Mutant took too long to test (usually not a concern)
-
-CI runs mutation testing weekly and on pushes to `main`. Check `.github/workflows/mutants.yml` for the schedule.
-
-### Fuzz Testing
-
-A fuzz testing scaffold is included using `cargo-fuzz`. This is particularly useful for testing parsers and complex logic against randomized input.
-
-```bash
-# Install cargo-fuzz (nightly required)
-cargo install cargo-fuzz
-
-# Run a specific fuzz target
-cargo fuzz run fuzz_parse_input -- -max_total_time=30
-```
-
-The fuzzer is also configured to run weekly via GitHub Actions.
-
-## Next Steps
-
-- Read `AGENTS.md` to understand how AI coding assistants are configured
-- Read `CONTRIBUTING.md` before making changes
-- Read [Faster Builds](docs/src/faster-builds.md) to optimize your development workflow
-- Check `MIGRATION.md` if adopting this template in an existing project
-- See `agents-docs/conventions.md` for coding conventions enforced by agents
-
-## Cross-Repo Context
-
-If you're using this template across multiple repositories, the `.agents/context/` directory enables cross-repo agent context sharing:
-
-| File | Purpose |
-|------|---------|
-| `.agents/context/external-repos.json` | Links to related repos and their agent context URLs |
-| `.agents/context/shared-conventions.md` | Conventions that apply across all derived repos |
-
-**Configuration for your org:**
-
-1. Edit `.agents/context/external-repos.json` to add your related repositories
-2. Update `.agents/context/shared-conventions.md` with org-wide rules
-3. Agents in derived repos will automatically discover and apply these conventions
-
-**Merge precedence** (when instructions conflict):
-1. Local repo instructions (AGENTS.md, .agents/skills/) — highest
-2. Imported context (.agents/context/) — secondary
-3. Template defaults (upstream rust-2026-template) — fallback only
+`GraphDraft::validate()` checks capacity settings and prepares an endpoint with a Tower buffer worker, so call it inside a Tokio runtime. `Netplane::publish()` swaps the active version atomically; requests already selected keep their previous version. The next milestone is shutdown admission control and bounded graceful draining.
 
 
 
@@ -882,9 +249,8 @@ If you're using this template across multiple repositories, the `.agents/context
 
 ## Supported Versions
 
-This is a **template repository**. Security fixes are applied to the `main` branch only.
-When you use this template to create a new project, you are responsible for applying
-security updates to your fork.
+Netplane is currently an unpublished library scaffold. Security fixes are applied to
+the `main` branch.
 
 | Version | Supported |
 | ------- | --------- |
@@ -896,7 +262,7 @@ security updates to your fork.
 **Do not open a public GitHub issue for security vulnerabilities.**
 
 Report vulnerabilities by opening a
-[GitHub Security Advisory](https://github.com/d-oit/rust-2026-template/security/advisories/new).
+[GitHub Security Advisory](https://github.com/janagor/netplane/security/advisories/new).
 
 Please include:
 
@@ -905,23 +271,20 @@ Please include:
 - Potential impact
 - Suggested fix (if any)
 
-You will receive an acknowledgment within 48 hours and a full response within 7 days.
+The maintainer will respond through the private advisory channel.
 
 ## Rust-Specific Security Practices
 
-This template enforces the following security practices:
+Netplane uses the following security practices:
 
 ### Dependency Auditing
 
 ```bash
-# Check for known vulnerabilities in dependencies
-cargo audit
-
-# Enforce license and supply chain policy
+# Check advisories, licenses, banned crates, and sources
 cargo deny check
 ```
 
-Both run automatically in CI on every push.
+This check runs on pull requests and pushes to `main`.
 
 ### Supply Chain Security
 
@@ -929,14 +292,11 @@ Both run automatically in CI on every push.
   - Allowed licenses list
   - Banned crates list
   - Advisory database checks
-- Dependabot is configured to auto-update dependencies weekly
+- Dependabot is configured to propose dependency updates weekly
 
 ### Unsafe Code
 
-- All `unsafe` blocks must include a `// SAFETY:` comment explaining invariants
-- Avoid `unsafe` unless absolutely necessary
-- If using `unsafe`, document it in your crate's `lib.rs` with `#![forbid(unsafe_code)]`
-  or explicitly allow and document each usage
+- The library forbids unsafe code.
 
 ### Secrets and Credentials
 
@@ -945,14 +305,8 @@ Both run automatically in CI on every push.
 - The `privacy-first` skill in `.agents/skills/privacy-first/` enforces no email
   addresses in the codebase
 
-## When Using This Template
-
-After creating a project from this template:
-
-1. Update this `SECURITY.md` with your project's security contact
-2. Enable GitHub's Dependabot alerts in your repo settings
-3. Configure branch protection on `main`
-4. Review `deny.toml` and customize for your license requirements
+Repository security settings, including Dependabot alerts and branch protection,
+are managed on GitHub and are separate from the checks defined in this repository.
 
 
 

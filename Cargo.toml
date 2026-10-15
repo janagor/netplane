@@ -84,6 +84,7 @@ cognitive_complexity = "allow"
 
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
+arc-swap = "1"
 thiserror = "2"
 tower = { version = "0.5", features = ["util", "buffer", "limit"] }
 serde = { version = "1", features = ["derive"] }

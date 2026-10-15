@@ -1,6 +1,6 @@
 # Quick start
 
-Netplane is already initialized as a Rust library workspace. Its library crate provides a bounded, single-version Tower service endpoint.
+Netplane is a Rust library workspace. Its library crate provides bounded Tower service endpoints and atomic publication of immutable execution versions.
 
 ## Prerequisites
 
@@ -26,11 +26,11 @@ Nix users can enter `nix develop`, then run the same Cargo commands. Toolchain c
 
 ## Where to work
 
-- `crates/netplane`: public library code with the initial execution endpoint.
+- `crates/netplane`: public library code with bounded execution and version publication.
 - `crates/xtask`: repository automation, not a runtime dependency.
 - `docs/architecture.md` and `docs/adr/`: design contract and decisions.
 - `AGENTS.md`: coding and review instructions.
 
-Read [the architecture](docs/architecture.md) before introducing graph types or transport adapters. Add a dependency only with its first consumer. Keep the core independent of sockets, Hyper, Kubernetes, and specific deployment environments.
+Read [the architecture](docs/architecture.md) before changing graph types or adding transport adapters. Add a dependency only with its first consumer. Keep the core independent of sockets, Hyper, Kubernetes, and specific deployment environments.
 
-The next milestone is atomic publication of immutable graph versions while existing requests keep their selected version.
+`GraphDraft::validate()` checks capacity settings and prepares an endpoint with a Tower buffer worker, so call it inside a Tokio runtime. `Netplane::publish()` swaps the active version atomically; requests already selected keep their previous version. The next milestone is shutdown admission control and bounded graceful draining.
