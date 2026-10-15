@@ -5,9 +5,19 @@
 
 #![forbid(unsafe_code)]
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 
-use arc_swap::ArcSwap;
+use arc_swap::ArcSwapOption;
+mod lifecycle;
+use lifecycle::Admission;
+pub use lifecycle::{AdmissionError, DrainError};
+use pin_project_lite::pin_project;
 use thiserror::Error;
 use tower::{
     BoxError, Service, ServiceExt, buffer::Buffer, limit::ConcurrencyLimit, util::BoxService,
@@ -36,13 +46,57 @@ pub enum ConfigError {
     ZeroBuffer,
 }
 
+/// A graph version could not be published.
+#[derive(Debug, Error)]
+pub enum PublishError {
+    /// Shutdown has already begun.
+    #[error("cannot publish after shutdown has started")]
+    ShuttingDown,
+}
+
+type BoxedResponse<Response> = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send>>;
+
 /// A cloneable handle to one bounded Tower service composition.
 ///
 /// Construct this inside a Tokio runtime. A worker owns the service and polls
 /// readiness before calling it. Dropping an execution future cancels its wait;
-/// cancellation of an already dispatched call depends on the service.
+/// cancellation of an already dispatched call depends on the service. The
+/// worker is aborted after its last endpoint and execution future owner drops.
 pub struct Endpoint<Request: Send, Response> {
-    buffer: Buffer<Request, Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send>>>,
+    buffer: Buffer<Request, BoxedResponse<Response>>,
+    worker: Arc<WorkerOwner>,
+}
+
+struct WorkerOwner(tokio::task::JoinHandle<()>);
+
+impl Drop for WorkerOwner {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+pin_project! {
+    struct RetainedExecution<Request, Response>
+    where
+        Request: Send,
+        Request: 'static,
+        Response: Send,
+        Response: 'static,
+    {
+        #[pin]
+        execution: tower::util::Oneshot<Buffer<Request, BoxedResponse<Response>>, Request>,
+        _worker: Arc<WorkerOwner>,
+    }
+}
+
+impl<Request: Send + 'static, Response: Send + 'static> Future
+    for RetainedExecution<Request, Response>
+{
+    type Output = Result<Response, BoxError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().execution.poll(cx)
+    }
 }
 
 impl<Request, Response> Endpoint<Request, Response>
@@ -51,6 +105,10 @@ where
     Response: Send + 'static,
 {
     /// Wrap a Tower service with a concurrency limit and bounded request queue.
+    ///
+    /// Netplane owns the Tower buffer worker and aborts it after the final
+    /// endpoint and request future release it, including during pending
+    /// service readiness.
     ///
     /// # Errors
     /// Returns an error if either capacity is zero.
@@ -70,8 +128,10 @@ where
             service.map_err(Into::into),
             capacity.max_in_flight,
         ));
+        let (buffer, worker) = Buffer::pair(boxed, capacity.buffer_capacity);
         Ok(Self {
-            buffer: Buffer::new(boxed, capacity.buffer_capacity),
+            buffer,
+            worker: Arc::new(WorkerOwner(tokio::spawn(worker))),
         })
     }
 
@@ -87,7 +147,12 @@ where
         request: Request,
     ) -> impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>
     {
-        self.buffer.clone().oneshot(request)
+        let worker = Arc::clone(&self.worker);
+        let execution = self.buffer.clone().oneshot(request);
+        RetainedExecution {
+            execution,
+            _worker: worker,
+        }
     }
 }
 
@@ -95,6 +160,7 @@ impl<Request: Send + 'static, Response: 'static> Clone for Endpoint<Request, Res
     fn clone(&self) -> Self {
         Self {
             buffer: self.buffer.clone(),
+            worker: Arc::clone(&self.worker),
         }
     }
 }
@@ -156,8 +222,11 @@ pub struct GraphVersion<Request: Send, Response> {
 ///
 /// Publication atomically changes the version selected by later `execute`
 /// calls. Existing execution futures keep their selected version alive.
+/// Shutdown closes admission for all handles, waits for accepted futures, and
+/// releases the active graph after draining succeeds.
 pub struct Netplane<Request: Send, Response> {
-    active: Arc<ArcSwap<GraphVersion<Request, Response>>>,
+    active: Arc<ArcSwapOption<GraphVersion<Request, Response>>>,
+    admission: Arc<Admission>,
 }
 
 impl<Request, Response> Netplane<Request, Response>
@@ -169,7 +238,8 @@ where
     #[must_use]
     pub fn new(version: GraphVersion<Request, Response>) -> Self {
         Self {
-            active: Arc::new(ArcSwap::from_pointee(version)),
+            active: Arc::new(ArcSwapOption::from(Some(Arc::new(version)))),
+            admission: Admission::new(),
         }
     }
 
@@ -178,26 +248,81 @@ where
     pub fn handle(&self) -> Handle<Request, Response> {
         Handle {
             active: Arc::clone(&self.active),
+            admission: Arc::clone(&self.admission),
         }
     }
 
-    /// Atomically publish a fully validated version.
+    /// Atomically publish a fully validated version while running.
     ///
     /// Already selected requests continue to use their previous version.
-    pub fn publish(&mut self, version: GraphVersion<Request, Response>) {
-        self.active.store(Arc::new(version));
+    ///
+    /// # Errors
+    /// Returns [`PublishError::ShuttingDown`] once shutdown has begun.
+    pub fn publish(
+        &mut self,
+        version: GraphVersion<Request, Response>,
+    ) -> Result<(), PublishError> {
+        if !self.admission.can_publish() {
+            return Err(PublishError::ShuttingDown);
+        }
+        self.active.store(Some(Arc::new(version)));
+        Ok(())
+    }
+
+    /// Close admission immediately and drain accepted request futures.
+    ///
+    /// A request accepted before this call may finish normally, including one
+    /// whose future has not yet been polled. Dropping such a future also counts
+    /// as drained. This does not forcibly stop work retained by an underlying
+    /// service after its caller drops the future. A timed-out drain can be
+    /// retried; admission remains closed. Once drained, the active graph is
+    /// released even if handles remain. The deadline starts when this method
+    /// is called, even if its returned future is polled later.
+    ///
+    /// # Errors
+    /// Returns [`DrainError::TimedOut`] with the outstanding future count if
+    /// the deadline expires before all accepted futures finish or are dropped.
+    pub fn shutdown(
+        &mut self,
+        grace_period: Duration,
+    ) -> impl Future<Output = Result<(), DrainError>> + Send + 'static + use<Request, Response>
+    {
+        let mut counts = self.admission.close();
+        let admission = Arc::clone(&self.admission);
+        let active = Arc::clone(&self.active);
+        let deadline = tokio::time::Instant::now() + grace_period;
+        async move {
+            let drain = async {
+                while *counts.borrow_and_update() != 0 {
+                    if counts.changed().await.is_err() {
+                        break;
+                    }
+                }
+            };
+            let _ = tokio::time::timeout_at(deadline, drain).await;
+            let remaining = admission.outstanding();
+            if remaining == 0 {
+                active.store(None);
+                admission.mark_stopped();
+                Ok(())
+            } else {
+                Err(DrainError::TimedOut { remaining })
+            }
+        }
     }
 }
 
 /// Cloneable request handle that selects a graph version at invocation time.
 pub struct Handle<Request: Send, Response> {
-    active: Arc<ArcSwap<GraphVersion<Request, Response>>>,
+    active: Arc<ArcSwapOption<GraphVersion<Request, Response>>>,
+    admission: Arc<Admission>,
 }
 
 impl<Request: Send, Response> Clone for Handle<Request, Response> {
     fn clone(&self) -> Self {
         Self {
             active: Arc::clone(&self.active),
+            admission: Arc::clone(&self.admission),
         }
     }
 }
@@ -207,24 +332,36 @@ where
     Request: Send + 'static,
     Response: Send + 'static,
 {
-    /// Select the active version now and return its request future.
+    /// Admit the request and select the active version now.
     ///
     /// The selected version stays alive until the future completes or is
     /// dropped. Dropping the future cancels its queue wait; cancellation after
     /// dispatch depends on the underlying service.
     ///
     /// # Errors
-    /// Returns a service error or a buffer worker error.
+    /// Returns [`AdmissionError`] if shutdown has closed admission or the
+    /// outstanding counter is exhausted. Otherwise returns a service or
+    /// buffer worker error.
     pub fn execute(
         &self,
         request: Request,
-    ) -> impl Future<Output = Result<Response, BoxError>> + Send + 'static {
-        let version = self.active.load_full();
-        let execution = version.endpoint.execute(request);
+    ) -> impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>
+    {
+        let selected = self.admission.try_admit().and_then(|guard| {
+            let version = self.active.load_full().ok_or(AdmissionError::Closed)?;
+            let execution = version.endpoint.execute(request);
+            Ok((guard, version, execution))
+        });
         async move {
-            let result = execution.await;
-            drop(version);
-            result
+            match selected {
+                Ok((guard, version, execution)) => {
+                    let result = execution.await;
+                    drop(version);
+                    drop(guard);
+                    result
+                }
+                Err(error) => Err(Box::new(error) as BoxError),
+            }
         }
     }
 }

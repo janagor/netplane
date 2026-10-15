@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-Netplane is a Rust library for dynamically reconfigurable Tower service graphs. The workspace has a bounded Tower endpoint, immutable version publication, and `xtask`. Shutdown admission control is not implemented yet.
+Netplane is a Rust library for dynamically reconfigurable Tower service graphs. The workspace has a bounded Tower endpoint, immutable version publication, shutdown admission control, and `xtask`.
 
 ## Design constraints
 
@@ -29,7 +29,7 @@ Create another crate only when a concrete dependency or API boundary justifies i
 
 Build an in-memory, transport-independent prototype that executes a composition of Tower services and publishes a new graph version. Its integration tests should show that requests already using the old version complete with the correct resources while new requests use the published version. Add focused tests for readiness, bounded concurrency, cancellation, and shutdown as the corresponding mechanisms are introduced.
 
-The initial prototype uses a Tower service root as its composition, validates positive concurrency and queue capacities, and publishes complete versions with `ArcSwap`. `execute()` selects a version synchronously when invoked and retains it through completion or future drop. Capacity is per version. A dropped future cancels its queue wait, while cancellation of dispatched work depends on the service. There is no HTTP listener or deployment integration. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing are not initial requirements; add them only when a concrete use case justifies them.
+The initial prototype uses a Tower service root as its composition, validates positive concurrency and queue capacities, and publishes complete versions with `ArcSwapOption`. `execute()` admits and selects a version synchronously when invoked and retains it through completion or future drop. Capacity is per version. A dropped future cancels its queue wait, while cancellation of dispatched work depends on the service. Netplane owns each Tower buffer worker and aborts it when its last endpoint and request future owner drops, including when the worker is stuck in service readiness. `shutdown(grace_period)` synchronously closes admission across all handles and waits for accepted request futures to finish or be dropped, including futures that have never been polled. Publication is rejected once shutdown starts. A timeout reports the outstanding count and leaves the runtime draining; another drain may be attempted. A successful drain clears the active graph so retained inactive handles do not own it. Shutdown does not forcibly reclaim resources held by an uncooperative user future or tasks spawned independently by a user service. There is no HTTP listener or deployment integration. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing are not initial requirements; add them only when a concrete use case justifies them.
 
 ## Decisions
 

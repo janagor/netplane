@@ -44,7 +44,7 @@ let old_request = handle.execute(1);
 let second = GraphDraft::new(service_fn(|value: usize| async move {
     Ok::<_, std::convert::Infallible>(value + 2)
 })).capacity(capacity).validate()?;
-runtime.publish(second);
+runtime.publish(second)?;
 assert_eq!(old_request.await?, 2);
 assert_eq!(handle.execute(1).await?, 3);
 # Ok(())
@@ -53,5 +53,18 @@ assert_eq!(handle.execute(1).await?, 3);
 
 Construct endpoints and validate drafts inside a Tokio runtime. Each version
 has its own capacity limits. Dropping an execution future cancels its queue
-wait; cancellation of work already dispatched depends on the service. Shutdown
-admission control is not implemented yet.
+wait; cancellation of work already dispatched depends on the service.
+
+Call `runtime.shutdown(grace_period)` to close admission immediately and wait for
+accepted request futures to finish or be dropped. A timeout reports the number
+still outstanding; admission stays closed, and the drain can be retried. A
+successful drain releases the active graph even while handles remain, and
+publication is rejected once shutdown starts. An unpolled request future
+accepted before shutdown counts as outstanding until it
+is polled to completion or dropped. Draining cannot forcibly reclaim work
+retained by an underlying service after its caller drops the future.
+
+Netplane owns each Tower buffer worker. When a replaced version or stopped
+runtime loses its final endpoint and request future owner, Netplane aborts that
+worker. This also releases a service stuck in `poll_ready()`. Tasks spawned
+independently by a user service remain the service's responsibility.

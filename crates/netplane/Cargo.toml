@@ -18,8 +18,10 @@ workspace = true
 
 [dependencies]
 arc-swap.workspace = true
+pin-project-lite.workspace = true
 tower.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

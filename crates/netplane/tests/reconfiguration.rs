@@ -55,7 +55,7 @@ async fn selected_version_survives_publication_before_poll_and_during_execution(
             }))
             .capacity(capacity())
             .validate()?,
-        );
+        )?;
         assert_eq!(handle.execute(3).await?, 103);
         let _ = release.send(());
         assert_eq!(running.await??, 12);
@@ -117,7 +117,7 @@ async fn retained_future_keeps_old_service_alive() -> Result<(), Box<dyn Error +
         }))
         .capacity(capacity())
         .validate()?,
-    );
+    )?;
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     drop(pending);
     timeout(Duration::from_secs(5), async {
@@ -172,7 +172,7 @@ async fn active_request_keeps_old_service_alive_until_completion()
             }))
             .capacity(capacity())
             .validate()?,
-        );
+        )?;
         assert_eq!(drops.load(Ordering::SeqCst), 0);
         release_tx
             .send(())
@@ -235,7 +235,7 @@ async fn concurrent_callers_see_only_complete_versions() -> Result<(), Box<dyn E
             }))
             .capacity(capacity())
             .validate()?,
-        );
+        )?;
         let new_result = handle.execute(1).await?;
         assert_eq!(new_result, 101);
         release_tx.send(true)?;
@@ -265,7 +265,7 @@ async fn failed_version_does_not_prevent_replacement() -> Result<(), Box<dyn Err
             }))
             .capacity(capacity())
             .validate()?,
-        );
+        )?;
         assert_eq!(handle.execute(1).await?, 2);
         Ok::<_, Box<dyn Error + Send + Sync>>(())
     })

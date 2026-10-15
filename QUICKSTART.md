@@ -1,6 +1,6 @@
 # Quick start
 
-Netplane is a Rust library workspace. Its library crate provides bounded Tower service endpoints and atomic publication of immutable execution versions.
+Netplane is a Rust library workspace. Its library crate provides bounded Tower service endpoints, atomic publication of immutable execution versions, and bounded graceful draining.
 
 ## Prerequisites
 
@@ -26,11 +26,11 @@ Nix users can enter `nix develop`, then run the same Cargo commands. Toolchain c
 
 ## Where to work
 
-- `crates/netplane`: public library code with bounded execution and version publication.
+- `crates/netplane`: public library code with bounded execution, version publication, and shutdown admission.
 - `crates/xtask`: repository automation, not a runtime dependency.
 - `docs/architecture.md` and `docs/adr/`: design contract and decisions.
 - `AGENTS.md`: coding and review instructions.
 
 Read [the architecture](docs/architecture.md) before changing graph types or adding transport adapters. Add a dependency only with its first consumer. Keep the core independent of sockets, Hyper, Kubernetes, and specific deployment environments.
 
-`GraphDraft::validate()` checks capacity settings and prepares an endpoint with a Tower buffer worker, so call it inside a Tokio runtime. `Netplane::publish()` swaps the active version atomically; requests already selected keep their previous version. The next milestone is shutdown admission control and bounded graceful draining.
+`GraphDraft::validate()` checks capacity settings and prepares an endpoint with a Tower buffer worker, so call it inside a Tokio runtime. `Netplane::publish()` swaps the active version atomically while running; requests already selected keep their previous version. `Netplane::shutdown(grace_period)` closes admission when called and returns a future that waits for accepted request futures to finish or be dropped. Successful draining releases the active graph, including when handles remain. A timeout leaves admission closed and can be retried; publication remains closed during and after shutdown. The next milestone is a live reconfiguration example.

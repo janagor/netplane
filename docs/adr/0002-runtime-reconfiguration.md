@@ -15,3 +15,7 @@ Build and validate a complete replacement graph before publication. Publish grap
 ## Consequences
 
 Tests must exercise publication during active requests and between readiness and dispatch, version isolation, and cleanup after cancellation. The publication mechanism, atomicity details, reclamation strategy, and version identifier type remain open until an in-memory prototype establishes their requirements.
+
+The first prototype uses `ArcSwapOption` for publication. Shutdown closes admission before draining accepted futures, rejects later publication, and clears the active snapshot after draining succeeds. A timed-out drain remains retryable.
+
+Each endpoint retains the handle for its Tower buffer worker. The worker is aborted after its last endpoint and request future owner drops, so pending readiness cannot keep an obsolete version's service alive indefinitely.
