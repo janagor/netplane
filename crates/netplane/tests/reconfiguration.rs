@@ -1,5 +1,5 @@
 //! Version selection and publication behavior.
-use netplane::{Capacity, ConfigError, GraphDraft, Netplane};
+use netplane::{Capacity, ConfigError, GraphDraft, Netplane, RuntimeLimits};
 use std::{
     convert::Infallible,
     error::Error,
@@ -44,7 +44,12 @@ async fn selected_version_survives_publication_before_poll_and_during_execution(
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph_a);
+        let mut runtime = Netplane::new(
+            graph_a,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let before_poll = handle.execute(1);
         let running = tokio::spawn(handle.execute(2));
@@ -74,7 +79,12 @@ async fn invalid_draft_cannot_replace_active_version() -> Result<(), Box<dyn Err
         }))
         .capacity(capacity())
         .validate()?;
-        let runtime = Netplane::new(graph);
+        let runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let invalid = GraphDraft::new(service_fn(|value: usize| async move {
             Ok::<_, Infallible>(value + 10)
@@ -108,7 +118,12 @@ async fn retained_future_keeps_old_service_alive() -> Result<(), Box<dyn Error +
     }))
     .capacity(capacity())
     .validate()?;
-    let mut runtime = Netplane::new(old);
+    let mut runtime = Netplane::new(
+        old,
+        RuntimeLimits {
+            max_outstanding: 1024,
+        },
+    )?;
     let handle = runtime.handle();
     let pending = handle.execute(1);
     runtime.publish(
@@ -162,7 +177,12 @@ async fn active_request_keeps_old_service_alive_until_completion()
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(old);
+        let mut runtime = Netplane::new(
+            old,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let active = tokio::spawn(handle.execute(1));
         entered_rx.await?;
@@ -210,7 +230,12 @@ async fn concurrent_callers_see_only_complete_versions() -> Result<(), Box<dyn E
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(first);
+        let mut runtime = Netplane::new(
+            first,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let callers: Vec<_> = (0..8)
             .map(|_| {
@@ -256,7 +281,12 @@ async fn failed_version_does_not_prevent_replacement() -> Result<(), Box<dyn Err
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(failing);
+        let mut runtime = Netplane::new(
+            failing,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         assert!(handle.execute(1).await.is_err());
         runtime.publish(

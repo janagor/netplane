@@ -2,7 +2,7 @@
 
 Netplane is an early stage library for dynamically reconfigurable Tower service compositions. Bounded execution, immutable version publication, and graceful shutdown are implemented.
 
-The core interoperates with `tower::Service`, preserves readiness and request lifetime across publication, bounds resources per version, and stays independent of concrete transports. General graph construction and a global admission budget are not implemented.
+The core interoperates with `tower::Service`, preserves readiness and request lifetime across publication, bounds per-version execution and global accepted requests, and stays independent of concrete transports. General graph construction is not implemented.
 
 The canonical [architecture contract](https://github.com/janagor/netplane/blob/main/docs/architecture.md), [execution semantics](execution-semantics.md), and decisions are maintained in the repository:
 

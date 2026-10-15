@@ -38,14 +38,15 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - Bounded Tower service execution with readiness and dispatch on the same service instance.
 - Atomic publication of complete, immutable versions using ArcSwapOption.
 - Synchronous version selection at Handle::execute() invocation; accepted requests retain that version until completion or future drop.
+- Global synchronous admission limit across handles and versions, including unpolled futures.
 - Queued-request cancellation, worker cleanup, and graceful, retryable shutdown draining.
 
 ## Limits and planned work
 
-- Concurrency and buffer bounds are per version; there is no global admission budget.
+- Concurrency and buffer bounds are per version; the global admission budget bounds accepted, unfinished requests.
 - GraphDraft validates positive capacities, not topology or application policy.
 - There is no general-purpose graph construction API.
-- Global admission budgeting, observability, a reconfiguration control API, HTTP integration, and general graph composition are planned.
+- Observability, a reconfiguration control API, HTTP integration, and general graph composition are planned.
 
 ## Workspace and authoritative documents
 

@@ -18,7 +18,7 @@ Add crates only when a concrete dependency boundary emerges. Keep transport and 
 - Publish complete immutable versions atomically. Accepted requests retain their selected version and worker resources until completion or future drop.
 - Preserve queued-request cancellation, worker cleanup, immediate shutdown admission closure, and retryable draining after a timeout. Dispatched cancellation depends on the service.
 - Keep `crates/netplane` independent of transports and deployment systems.
-- Preserve per-version concurrency and buffer bounds. There is no global admission budget: callers waiting for buffer capacity may accumulate across versions.
+- Preserve per-version concurrency and buffer bounds. A positive global admission budget bounds accepted, unfinished requests across versions and handles, including unpolled futures.
 - `GraphDraft` validates positive capacities; it does not validate topology or application policy. A general graph construction API is not implemented.
 
 ## Design rules

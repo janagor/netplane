@@ -4,7 +4,7 @@ use std::{convert::Infallible, error::Error, io, time::Duration};
 use tokio::sync::oneshot;
 use tower::{ServiceBuilder, ServiceExt, filter::FilterLayer, service_fn};
 
-use netplane::{Capacity, GraphDraft, Netplane};
+use netplane::{Capacity, GraphDraft, Netplane, RuntimeLimits};
 
 #[derive(Clone, Copy)]
 /// Request data used by both published compositions.
@@ -57,7 +57,12 @@ pub async fn run_demo() -> Result<Results, Box<dyn Error + Send + Sync>> {
         }
     });
     let graph_a = GraphDraft::new(direct_a).capacity(CAPACITY).validate()?;
-    let mut runtime = Netplane::new(graph_a);
+    let mut runtime = Netplane::new(
+        graph_a,
+        RuntimeLimits {
+            max_outstanding: 1024,
+        },
+    )?;
     let handle = runtime.handle();
     let old_request = tokio::spawn(handle.execute(Request {
         key: 1,

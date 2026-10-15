@@ -35,6 +35,13 @@ pub struct Capacity {
     pub buffer_capacity: usize,
 }
 
+/// Global limit for accepted, unfinished requests across all handles and versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLimits {
+    /// Maximum accepted requests, including futures that have not been polled.
+    pub max_outstanding: usize,
+}
+
 /// An invalid endpoint capacity setting.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -44,6 +51,9 @@ pub enum ConfigError {
     /// The buffer capacity must be positive.
     #[error("buffer_capacity must be positive")]
     ZeroBuffer,
+    /// The global outstanding request limit must be positive.
+    #[error("max_outstanding must be positive")]
+    ZeroOutstanding,
 }
 
 /// A graph version could not be published.
@@ -234,13 +244,21 @@ where
     Request: Send + 'static,
     Response: Send + 'static,
 {
-    /// Start with a validated version.
-    #[must_use]
-    pub fn new(version: GraphVersion<Request, Response>) -> Self {
-        Self {
-            active: Arc::new(ArcSwapOption::from(Some(Arc::new(version)))),
-            admission: Admission::new(),
+    /// Start with a validated version and a positive global admission limit.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::ZeroOutstanding`] if the limit is zero.
+    pub fn new(
+        version: GraphVersion<Request, Response>,
+        limits: RuntimeLimits,
+    ) -> Result<Self, ConfigError> {
+        if limits.max_outstanding == 0 {
+            return Err(ConfigError::ZeroOutstanding);
         }
+        Ok(Self {
+            active: Arc::new(ArcSwapOption::from(Some(Arc::new(version)))),
+            admission: Admission::new(limits.max_outstanding),
+        })
     }
 
     /// Obtain a cloneable request execution handle.
@@ -332,34 +350,50 @@ where
     Request: Send + 'static,
     Response: Send + 'static,
 {
-    /// Admit the request and select the active version now.
+    /// Admit a request and select its version synchronously.
     ///
-    /// The selected version stays alive until the future completes or is
-    /// dropped. Dropping the future cancels its queue wait; cancellation after
-    /// dispatch depends on the underlying service.
+    /// The accepted future holds one global slot and its selected version until
+    /// it completes or is dropped. Dropping it cancels its queue wait; a
+    /// dispatched service determines whether its work can be canceled.
     ///
     /// # Errors
-    /// Returns [`AdmissionError`] if shutdown has closed admission or the
-    /// outstanding counter is exhausted. Otherwise returns a service or
-    /// buffer worker error.
+    /// Returns [`AdmissionError::Closed`] after shutdown begins, or
+    /// [`AdmissionError::AtCapacity`] when the global budget is full.
+    pub fn try_execute(
+        &self,
+        request: Request,
+    ) -> Result<
+        impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>,
+        AdmissionError,
+    > {
+        let guard = self.admission.try_admit()?;
+        let version = self.active.load_full().ok_or(AdmissionError::Closed)?;
+        let execution = version.endpoint.execute(request);
+        Ok(async move {
+            let result = execution.await;
+            drop(version);
+            drop(guard);
+            result
+        })
+    }
+
+    /// Admit the request now and return a future that executes it.
+    ///
+    /// Admission errors are boxed into the returned future's result. The
+    /// accepted future releases its slot on completion or drop.
+    ///
+    /// # Errors
+    /// Returns a boxed [`AdmissionError`] for overload or shutdown, or a
+    /// service or buffer worker error after admission.
     pub fn execute(
         &self,
         request: Request,
     ) -> impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>
     {
-        let selected = self.admission.try_admit().and_then(|guard| {
-            let version = self.active.load_full().ok_or(AdmissionError::Closed)?;
-            let execution = version.endpoint.execute(request);
-            Ok((guard, version, execution))
-        });
+        let selected = self.try_execute(request);
         async move {
             match selected {
-                Ok((guard, version, execution)) => {
-                    let result = execution.await;
-                    drop(version);
-                    drop(guard);
-                    result
-                }
+                Ok(execution) => execution.await,
                 Err(error) => Err(Box::new(error) as BoxError),
             }
         }

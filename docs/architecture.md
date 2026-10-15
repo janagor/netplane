@@ -27,11 +27,11 @@ Create another crate only when a concrete dependency or API boundary justifies i
 
 ## Implemented runtime
 
-The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets.
+The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets.
 
 ## Current limits and future work
 
-There is no global admission budget across versions or callers waiting for queue capacity. Validation checks positive capacities, not graph topology or application policy. There is no general-purpose graph construction API. Global admission budgeting, observability, a reconfiguration control API, HTTP integration, and broader graph composition are planned work; none are current guarantees. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation.
+A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. Validation checks positive capacities, not graph topology or application policy. There is no general-purpose graph construction API. Observability, a reconfiguration control API, HTTP integration, and broader graph composition are planned work; none are current guarantees. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation.
 
 ## Decisions
 

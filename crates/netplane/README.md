@@ -30,7 +30,7 @@ assert_eq!(result, 2);
 To reconfigure execution, validate a `GraphDraft` and give it to `Netplane`:
 
 ```rust,no_run
-use netplane::{Capacity, GraphDraft, Netplane};
+use netplane::{Capacity, GraphDraft, Netplane, RuntimeLimits};
 use tower::service_fn;
 
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,7 +38,7 @@ let capacity = Capacity { max_in_flight: 32, buffer_capacity: 64 };
 let first = GraphDraft::new(service_fn(|value: usize| async move {
     Ok::<_, std::convert::Infallible>(value + 1)
 })).capacity(capacity).validate()?;
-let mut runtime = Netplane::new(first);
+let mut runtime = Netplane::new(first, RuntimeLimits { max_outstanding: 1024 })?;
 let handle = runtime.handle();
 let old_request = handle.execute(1);
 let second = GraphDraft::new(service_fn(|value: usize| async move {
@@ -52,7 +52,7 @@ assert_eq!(handle.execute(1).await?, 3);
 ```
 
 Construct endpoints and validate drafts inside a Tokio runtime. Each version
-has its own capacity limits. Dropping an execution future cancels its queue
+has its own execution and buffer capacity limits. The explicit global limit bounds accepted, unfinished requests across every handle and retained version, including unpolled futures. At the limit, `try_execute()` returns `AdmissionError::AtCapacity` immediately. Dropping an execution future cancels its queue
 wait; cancellation of work already dispatched depends on the service.
 
 Call `runtime.shutdown(grace_period)` to close admission immediately and wait for

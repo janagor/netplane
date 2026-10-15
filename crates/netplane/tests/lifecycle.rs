@@ -1,5 +1,7 @@
 //! Shutdown admission, draining, cancellation, and delayed readiness.
-use netplane::{AdmissionError, Capacity, DrainError, GraphDraft, Netplane, PublishError};
+use netplane::{
+    AdmissionError, Capacity, DrainError, GraphDraft, Netplane, PublishError, RuntimeLimits,
+};
 use std::{
     convert::Infallible,
     error::Error,
@@ -45,7 +47,12 @@ async fn shutdown_closes_admission_and_drains_active_request()
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let active = tokio::spawn(handle.execute(1));
         entered_rx.await?;
@@ -80,7 +87,12 @@ async fn timed_out_drain_can_be_retried_after_unpolled_future_is_dropped()
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let pending = handle.execute(1);
         assert!(matches!(
@@ -148,7 +160,12 @@ async fn cancellation_during_execution_releases_drain_ownership()
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let active = tokio::spawn(handle.execute(1));
         entered_rx.await?;
@@ -223,7 +240,12 @@ async fn delayed_readiness_survives_publication_and_shutdown()
         })
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph_a);
+        let mut runtime = Netplane::new(
+            graph_a,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let old = tokio::spawn(handle.execute(1));
         polled_rx.await?;
@@ -261,7 +283,12 @@ async fn service_failure_releases_drain_ownership() -> Result<(), Box<dyn Error 
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         assert!(handle.execute(1).await.is_err());
         runtime.shutdown(Duration::ZERO).await?;
@@ -280,7 +307,12 @@ async fn shutdown_rejects_publication_during_and_after_drain()
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let pending = handle.execute(1);
         let drain = runtime.shutdown(Duration::from_secs(5));
@@ -330,7 +362,12 @@ async fn shutdown_releases_active_graph_with_retained_handle()
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         runtime.shutdown(Duration::from_secs(5)).await?;
         dropped_rx.await?;
@@ -358,7 +395,12 @@ async fn shutdown_without_poll_closes_admission_and_retry_is_idempotent()
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let drain = runtime.shutdown(Duration::from_secs(5));
         let rejected = handle
@@ -387,7 +429,12 @@ async fn shutdown_concurrent_with_execute() -> Result<(), Box<dyn Error + Send +
         }))
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let accepted = handle.execute(1);
         let barrier = Arc::new(Barrier::new(17));

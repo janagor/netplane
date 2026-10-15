@@ -16,14 +16,15 @@
 - Bounded Tower service execution with readiness and dispatch on the same service instance.
 - Atomic publication of complete, immutable versions using ArcSwapOption.
 - Synchronous version selection at Handle::execute() invocation; accepted requests retain that version until completion or future drop.
+- Global synchronous admission limit across handles and versions, including unpolled futures.
 - Queued-request cancellation, worker cleanup, and graceful, retryable shutdown draining.
 
 ## Limits and planned work
 
-- Concurrency and buffer bounds are per version; there is no global admission budget.
+- Concurrency and buffer bounds are per version; the global admission budget bounds accepted, unfinished requests.
 - GraphDraft validates positive capacities, not topology or application policy.
 - There is no general-purpose graph construction API.
-- Global admission budgeting, observability, a reconfiguration control API, HTTP integration, and general graph composition are planned.
+- Observability, a reconfiguration control API, HTTP integration, and general graph composition are planned.
 
 ## Workspace and authoritative documents
 
@@ -95,7 +96,7 @@ Add crates only when a concrete dependency boundary emerges. Keep transport and 
 - Publish complete immutable versions atomically. Accepted requests retain their selected version and worker resources until completion or future drop.
 - Preserve queued-request cancellation, worker cleanup, immediate shutdown admission closure, and retryable draining after a timeout. Dispatched cancellation depends on the service.
 - Keep `crates/netplane` independent of transports and deployment systems.
-- Preserve per-version concurrency and buffer bounds. There is no global admission budget: callers waiting for buffer capacity may accumulate across versions.
+- Preserve per-version concurrency and buffer bounds. A positive global admission budget bounds accepted, unfinished requests across versions and handles, including unpolled futures.
 - `GraphDraft` validates positive capacities; it does not validate topology or application policy. A general graph construction API is not implemented.
 
 ## Design rules
@@ -194,11 +195,11 @@ Create another crate only when a concrete dependency or API boundary justifies i
 
 ## Implemented runtime
 
-The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets.
+The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets.
 
 ## Current limits and future work
 
-There is no global admission budget across versions or callers waiting for queue capacity. Validation checks positive capacities, not graph topology or application policy. There is no general-purpose graph construction API. Global admission budgeting, observability, a reconfiguration control API, HTTP integration, and broader graph composition are planned work; none are current guarantees. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation.
+A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. Validation checks positive capacities, not graph topology or application policy. There is no general-purpose graph construction API. Observability, a reconfiguration control API, HTTP integration, and broader graph composition are planned work; none are current guarantees. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation.
 
 ## Decisions
 
@@ -224,9 +225,9 @@ This is the canonical contract for the implemented runtime. `crates/netplane` ex
 
 ## Capacity and cancellation
 
-Each version has its own concurrency limit and bounded Tower buffer. Capacity is not shared across retained versions; a transition can therefore have work executing in both versions. The buffer bounds queued requests, while callers waiting for queue capacity remain pending. There is no global budget for accepted request futures or queue waiters; the outstanding counter only rejects overflow. The example's router chooses between two always-ready in-memory backends, and its filter checks a caller-provided Boolean before routing. This is only a simulated authorization decision, not identity authentication.
+Each version has its own concurrency limit and bounded Tower buffer. Capacity is not shared across retained versions; a transition can therefore have work executing in both versions. The buffer bounds queued requests, while callers waiting for queue capacity remain pending. `RuntimeLimits::max_outstanding` bounds all accepted, unfinished request futures across versions and cloned handles, including unpolled futures and queue waiters. Admission happens synchronously at `Handle::execute()` or `try_execute()` invocation. At the limit, `try_execute()` returns `AdmissionError::AtCapacity` immediately; `execute()` returns a future containing that boxed error. Completion or future drop releases one slot. Publication does not reset the budget, and old-version requests keep their slots until completion or drop. Shutdown closure takes precedence over overload. This limit does not bound tasks spawned by services or request memory. The example's router chooses between two always-ready in-memory backends, and its filter checks a caller-provided Boolean before routing. This is only a simulated authorization decision, not identity authentication.
 
-Dropping a queued request cancels its wait. Cancellation of a dispatched call depends on the underlying service. Netplane owns each Tower buffer worker and aborts it when the last owning endpoint and request future reference disappears, including when the worker is stuck in readiness.
+Dropping a queued request cancels its wait. Dropping a dispatched request future releases its global admission slot, but cancellation of the underlying call depends on the service. Thus `max_outstanding` bounds accepted Netplane request futures, not all service executions that may continue after cancellation. Netplane owns each Tower buffer worker and aborts it when the last owning endpoint and request future reference disappears, including when the worker is stuck in readiness.
 
 ## Shutdown
 
@@ -234,7 +235,7 @@ Calling `Netplane::shutdown(grace_period)` closes admission synchronously across
 
 ## Outside the current runtime
 
-General graph construction, topology and policy validation, global admission budgeting, observability, a reconfiguration control API, and HTTP integration remain future work.
+General graph construction, topology and policy validation, observability, a reconfiguration control API, and HTTP integration remain future work.
 
 ## Source: docs/adr/0001-tower-service-model.md
 

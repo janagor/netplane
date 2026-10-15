@@ -1,5 +1,5 @@
 //! Resource cleanup while Tower's buffer worker waits for readiness.
-use netplane::{Capacity, Endpoint, GraphDraft, Netplane};
+use netplane::{Capacity, Endpoint, GraphDraft, Netplane, RuntimeLimits};
 use std::{
     convert::Infallible,
     error::Error,
@@ -62,7 +62,12 @@ async fn cancel_request_during_pending_readiness_releases_old_service()
         })
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph_a);
+        let mut runtime = Netplane::new(
+            graph_a,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let request = tokio::spawn(handle.execute(1));
         polled_rx.await?;
@@ -96,7 +101,12 @@ async fn shutdown_releases_service_waiting_for_readiness()
         })
         .capacity(capacity())
         .validate()?;
-        let mut runtime = Netplane::new(graph);
+        let mut runtime = Netplane::new(
+            graph,
+            RuntimeLimits {
+                max_outstanding: 1024,
+            },
+        )?;
         let handle = runtime.handle();
         let request = tokio::spawn(handle.execute(1));
         polled_rx.await?;

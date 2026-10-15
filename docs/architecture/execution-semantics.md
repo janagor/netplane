@@ -10,9 +10,9 @@ This is the canonical contract for the implemented runtime. `crates/netplane` ex
 
 ## Capacity and cancellation
 
-Each version has its own concurrency limit and bounded Tower buffer. Capacity is not shared across retained versions; a transition can therefore have work executing in both versions. The buffer bounds queued requests, while callers waiting for queue capacity remain pending. There is no global budget for accepted request futures or queue waiters; the outstanding counter only rejects overflow. The example's router chooses between two always-ready in-memory backends, and its filter checks a caller-provided Boolean before routing. This is only a simulated authorization decision, not identity authentication.
+Each version has its own concurrency limit and bounded Tower buffer. Capacity is not shared across retained versions; a transition can therefore have work executing in both versions. The buffer bounds queued requests, while callers waiting for queue capacity remain pending. `RuntimeLimits::max_outstanding` bounds all accepted, unfinished request futures across versions and cloned handles, including unpolled futures and queue waiters. Admission happens synchronously at `Handle::execute()` or `try_execute()` invocation. At the limit, `try_execute()` returns `AdmissionError::AtCapacity` immediately; `execute()` returns a future containing that boxed error. Completion or future drop releases one slot. Publication does not reset the budget, and old-version requests keep their slots until completion or drop. Shutdown closure takes precedence over overload. This limit does not bound tasks spawned by services or request memory. The example's router chooses between two always-ready in-memory backends, and its filter checks a caller-provided Boolean before routing. This is only a simulated authorization decision, not identity authentication.
 
-Dropping a queued request cancels its wait. Cancellation of a dispatched call depends on the underlying service. Netplane owns each Tower buffer worker and aborts it when the last owning endpoint and request future reference disappears, including when the worker is stuck in readiness.
+Dropping a queued request cancels its wait. Dropping a dispatched request future releases its global admission slot, but cancellation of the underlying call depends on the service. Thus `max_outstanding` bounds accepted Netplane request futures, not all service executions that may continue after cancellation. Netplane owns each Tower buffer worker and aborts it when the last owning endpoint and request future reference disappears, including when the worker is stuck in readiness.
 
 ## Shutdown
 
@@ -20,4 +20,4 @@ Calling `Netplane::shutdown(grace_period)` closes admission synchronously across
 
 ## Outside the current runtime
 
-General graph construction, topology and policy validation, global admission budgeting, observability, a reconfiguration control API, and HTTP integration remain future work.
+General graph construction, topology and policy validation, observability, a reconfiguration control API, and HTTP integration remain future work.

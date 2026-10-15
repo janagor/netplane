@@ -11,9 +11,12 @@ pub enum AdmissionError {
     /// Shutdown has closed admission for this runtime.
     #[error("netplane admission is closed")]
     Closed,
-    /// The outstanding request counter cannot represent another request.
-    #[error("too many outstanding requests")]
-    TooManyOutstanding,
+    /// The runtime has reached its configured outstanding request limit.
+    #[error("outstanding request limit {limit} reached")]
+    AtCapacity {
+        /// Configured maximum number of accepted unfinished requests.
+        limit: usize,
+    },
 }
 
 /// A graceful drain did not complete within its deadline.
@@ -41,17 +44,19 @@ enum Phase {
 
 pub struct Admission {
     state: Mutex<State>,
+    max_outstanding: usize,
     changed: watch::Sender<usize>,
 }
 
 impl Admission {
-    pub(crate) fn new() -> Arc<Self> {
+    pub(crate) fn new(max_outstanding: usize) -> Arc<Self> {
         let (changed, _) = watch::channel(0);
         Arc::new(Self {
             state: Mutex::new(State {
                 phase: Phase::Running,
                 outstanding: 0,
             }),
+            max_outstanding,
             changed,
         })
     }
@@ -64,11 +69,13 @@ impl Admission {
         if state.phase != Phase::Running {
             return Err(AdmissionError::Closed);
         }
-        let Some(next) = state.outstanding.checked_add(1) else {
-            return Err(AdmissionError::TooManyOutstanding);
-        };
-        state.outstanding = next;
-        self.changed.send_replace(next);
+        if state.outstanding >= self.max_outstanding {
+            return Err(AdmissionError::AtCapacity {
+                limit: self.max_outstanding,
+            });
+        }
+        state.outstanding += 1;
+        self.changed.send_replace(state.outstanding);
         drop(state);
         Ok(AdmissionGuard(Arc::clone(self)))
     }
