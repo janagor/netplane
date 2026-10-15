@@ -17,6 +17,7 @@ The repository pins Rust 1.88 in `rust-toolchain.toml`. See [QUICKSTART.md](QUIC
 ```bash
 cargo build --workspace
 cargo test --workspace
+cargo run -p netplane --example live_reconfiguration
 ```
 
 The workspace contains `crates/netplane` (the public library) and `crates/xtask` (development tooling). Dependencies are added only when used. `Cargo.lock` is ignored for this library workspace.

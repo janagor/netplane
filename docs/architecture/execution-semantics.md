@@ -1,0 +1,9 @@
+# Execution semantics of the first runtime
+
+`GraphDraft` accepts a Tower service root, including one built with `ServiceBuilder` and layers. Validation checks positive concurrency and buffer capacities and starts a Tower buffer worker. It does not parse a graph schema, inspect routes, or prove that an application policy is correct. The [live reconfiguration example](../../crates/netplane/examples/live_reconfiguration.rs) implements a simulated authorization filter and routing policy as ordinary Tower services.
+
+`Handle::execute()` selects an immutable version when called, before its returned future is polled. Publication swaps the active version atomically. An accepted request keeps its selected version through completion or future drop, so an old request can finish after a new composition is published. The buffer worker polls readiness and calls the same owned service instance. Requests selected after publication use the new version.
+
+Each version has its own concurrency limit and bounded Tower buffer. Capacity is not shared across retained versions; a transition can therefore have work executing in both versions. The buffer bounds queued requests, while callers waiting for queue capacity remain pending. The example's router chooses between two always-ready in-memory backends, and its filter checks a caller-provided Boolean before routing. This is only a simulated authorization decision, not identity authentication.
+
+Dropping a queued request cancels its wait. Cancellation of a dispatched call depends on the underlying service. Shutdown closes admission synchronously, then drains accepted futures within the supplied grace period. It cannot forcibly reclaim resources still held by an uncooperative user-owned future or by tasks spawned independently inside a service. A timed-out drain can be retried.
