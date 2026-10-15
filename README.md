@@ -2,13 +2,13 @@
 
 Netplane is an early stage Rust library for constructing and managing dynamically reconfigurable Tower service graphs. It aims to make graph publication, request lifetime, readiness, backpressure, and cancellation behavior explicit.
 
-The repository currently contains a minimal library crate and development tooling. It does **not** yet provide a graph runtime or a usable public API. Version `0.0.0` marks this pre-release stage; the crate is not published.
+The repository currently provides a single-version, bounded Tower service endpoint and development tooling. Graph publication and lifecycle management are not implemented yet. Version `0.0.0` marks this pre-release stage; the crate is not published.
 
 ## Scope
 
 Netplane builds on `tower::Service`. The core is intended to be transport independent and testable with in-memory services. HTTP adapters and deployment integrations can be added later, behind real dependency boundaries. Netplane is not a standalone HTTP proxy or a replacement async runtime.
 
-The design contract is in [docs/architecture.md](docs/architecture.md), with decisions recorded in [docs/adr](docs/adr). These documents describe intended behavior, not implemented guarantees.
+The design contract is in [docs/architecture.md](docs/architecture.md), with decisions recorded in [docs/adr](docs/adr). They distinguish current behavior from future requirements.
 
 ## Get started
 
@@ -19,7 +19,7 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-The workspace contains `crates/netplane` (the future public library) and `crates/xtask` (development tooling). Dependencies are added only when used. `Cargo.lock` is ignored for this library workspace.
+The workspace contains `crates/netplane` (the public library) and `crates/xtask` (development tooling). Dependencies are added only when used. `Cargo.lock` is ignored for this library workspace.
 
 ## Contribute
 

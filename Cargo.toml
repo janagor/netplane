@@ -85,6 +85,7 @@ cognitive_complexity = "allow"
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
 thiserror = "2"
+tower = { version = "0.5", features = ["util", "buffer", "limit"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"

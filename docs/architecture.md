@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-Netplane is a pre-implementation Rust library for dynamically reconfigurable Tower service graphs. The workspace has a minimal library crate and `xtask`; the graph runtime and public API do not exist yet. This document sets design requirements for future work, not a claim of current behavior.
+Netplane is a Rust library for dynamically reconfigurable Tower service graphs. The workspace has a first single-version Tower execution endpoint and `xtask`. Graph publication, version ownership, and shutdown admission control are not implemented yet. This document sets requirements for that future work.
 
 ## Design constraints
 

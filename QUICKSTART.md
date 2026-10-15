@@ -1,6 +1,6 @@
 # Quick start
 
-Netplane is already initialized as a Rust library workspace. Its current library crate is a documented scaffold without a graph runtime or public API.
+Netplane is already initialized as a Rust library workspace. Its library crate provides a bounded, single-version Tower service endpoint.
 
 ## Prerequisites
 
@@ -26,11 +26,11 @@ Nix users can enter `nix develop`, then run the same Cargo commands. Toolchain c
 
 ## Where to work
 
-- `crates/netplane`: public library code, currently a scaffold.
+- `crates/netplane`: public library code with the initial execution endpoint.
 - `crates/xtask`: repository automation, not a runtime dependency.
 - `docs/architecture.md` and `docs/adr/`: design contract and decisions.
 - `AGENTS.md`: coding and review instructions.
 
 Read [the architecture](docs/architecture.md) before introducing graph types or transport adapters. Add a dependency only with its first consumer. Keep the core independent of sockets, Hyper, Kubernetes, and specific deployment environments.
 
-The first planned technical milestone is an in-memory graph of Tower services. Its tests should cover publishing a new version while requests use the old one, readiness, bounded concurrency, cancellation, and resource lifetime.
+The next milestone is atomic publication of immutable graph versions while existing requests keep their selected version.
