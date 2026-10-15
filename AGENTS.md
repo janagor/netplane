@@ -1,28 +1,37 @@
 # Netplane agent coding contract
 
-Netplane is a reusable Rust library for dynamically reconfigurable Tower service graphs. The current crate is a scaffold: do not describe graph execution, hot replacement, or lifecycle guarantees as implemented. Read [docs/architecture.md](docs/architecture.md) and the decisions in `docs/adr/` before changing the public API.
+Netplane is a reusable Rust library with bounded Tower execution, immutable graph-version publication, request-version retention, and graceful shutdown. Read [docs/architecture.md](docs/architecture.md), the [execution contract](docs/architecture/execution-semantics.md), and the decisions in `docs/adr/` before changing the public API.
 
 ## Workspace
 
 | Path | Responsibility |
 | --- | --- |
-| `crates/netplane` | Public library and future transport-independent graph runtime. |
+| `crates/netplane` | Public, transport-independent runtime library. |
 | `crates/xtask` | Development automation; never a runtime dependency of the library. |
 | `docs/architecture.md`, `docs/adr/` | Design requirements and accepted decisions. |
 
 Add crates only when a concrete dependency boundary emerges. Keep transport and deployment adapters outside the core. Add dependencies when they have consumers, use workspace versions, and minimize dependencies exposed by the public API.
 
+## Netplane runtime invariants
+
+- Preserve Tower readiness and dispatch on the same service instance and selected version, including across publication.
+- Publish complete immutable versions atomically. Accepted requests retain their selected version and worker resources until completion or future drop.
+- Preserve queued-request cancellation, worker cleanup, immediate shutdown admission closure, and retryable draining after a timeout. Dispatched cancellation depends on the service.
+- Keep `crates/netplane` independent of transports and deployment systems.
+- Preserve per-version concurrency and buffer bounds. There is no global admission budget: callers waiting for buffer capacity may accumulate across versions.
+- `GraphDraft` validates positive capacities; it does not validate topology or application policy. A general graph construction API is not implemented.
+
 ## Design rules
 
 - Interoperate with `tower::Service` and preserve readiness semantics. Avoid a competing service abstraction without a demonstrated need.
 - Keep readiness and dispatch for each request on the same service instance and graph version, including across publication.
-- Validate a replacement graph before publishing it. Treat published graph versions as immutable.
+- Validate a replacement version before publishing it. Treat published versions as immutable.
 - Make ownership and request lifetime explicit so in-flight requests keep required resources through completion or cancellation.
 - Bound concurrency, queues, and task creation. Never hide overload with unbounded spawning.
 - Keep locks out of `.await` spans. Use `tokio` only when runtime work needs it; offload blocking or long CPU work appropriately.
 - Make cancellation, timeout, and shutdown cleanup observable and testable.
-- Test core behavior with mock services, without sockets. Cover graph lifetime, readiness, backpressure, and concurrency as those features are implemented.
-- Do not implement HTTP listeners, Kubernetes integration, or cloud deployment as part of the initial graph runtime.
+- Test core behavior with mock services, without sockets. Cover version lifetime, readiness, backpressure, concurrency, cancellation, and shutdown when changing those behaviors.
+- Keep future HTTP and deployment adapters outside the core runtime.
 
 ## Rust and API conventions
 

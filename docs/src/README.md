@@ -1,6 +1,6 @@
 # Netplane documentation
 
-Netplane is an early stage Rust library for dynamically reconfigurable Tower service graphs. The graph runtime and public API are not yet implemented. This book contains development guides and the intended architecture.
+Netplane is an early stage Rust library with bounded Tower execution, atomic version publication, request-version retention, cancellation, and graceful shutdown. This book covers the current runtime contract and development guides. General graph construction and global admission budgeting remain future work.
 
 - [Getting started](getting-started.md) covers local setup.
 - [Architecture](architecture.md) summarizes the project contract and decisions.

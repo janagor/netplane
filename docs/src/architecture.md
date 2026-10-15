@@ -1,10 +1,10 @@
 # Architecture
 
-Netplane is an early stage library for dynamically reconfigurable Tower service graphs. The runtime and public API have not yet been implemented.
+Netplane is an early stage library for dynamically reconfigurable Tower service compositions. Bounded execution, immutable version publication, and graceful shutdown are implemented.
 
-The core is intended to interoperate with `tower::Service`, preserve readiness and request lifetime across graph publication, bound resources, and stay independent of concrete transports. The first prototype may use a service composition or routing tree; it does not need a general directed graph.
+The core interoperates with `tower::Service`, preserves readiness and request lifetime across publication, bounds resources per version, and stays independent of concrete transports. General graph construction and a global admission budget are not implemented.
 
-The canonical [architecture contract](https://github.com/janagor/netplane/blob/main/docs/architecture.md) and initial decisions are maintained in the repository:
+The canonical [architecture contract](https://github.com/janagor/netplane/blob/main/docs/architecture.md), [execution semantics](execution-semantics.md), and decisions are maintained in the repository:
 
 - [ADR 0001: Tower service model](https://github.com/janagor/netplane/blob/main/docs/adr/0001-tower-service-model.md)
 - [ADR 0002: Runtime reconfiguration](https://github.com/janagor/netplane/blob/main/docs/adr/0002-runtime-reconfiguration.md)

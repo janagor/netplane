@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-Netplane is a Rust library for dynamically reconfigurable Tower service graphs. The workspace has a bounded Tower endpoint, immutable version publication, shutdown admission control, and `xtask`.
+Netplane is a Rust library for dynamically reconfigurable Tower service compositions. The workspace has a bounded Tower endpoint, immutable version publication, shutdown admission control, and `xtask`. [Execution semantics](architecture/execution-semantics.md) is the canonical contract for implemented runtime behavior.
 
 ## Design constraints
 
@@ -19,17 +19,19 @@ Netplane is a Rust library for dynamically reconfigurable Tower service graphs. 
 
 | Path | Responsibility |
 | --- | --- |
-| `crates/netplane` | Public library and future graph runtime. Keep its public dependency surface small. |
+| `crates/netplane` | Public, transport-independent runtime library. Keep its public dependency surface small. |
 | `crates/xtask` | Build and quality automation. Never a runtime dependency of `netplane`. |
 | `docs/adr` | Accepted architectural decisions and their consequences. |
 
 Create another crate only when a concrete dependency or API boundary justifies it. A future transport adapter may depend on the core; the core must not depend on that adapter.
 
-## First implementation milestone
+## Implemented runtime
 
-Build an in-memory, transport-independent prototype that executes a composition of Tower services and publishes a new graph version. Its integration tests should show that requests already using the old version complete with the correct resources while new requests use the published version. Add focused tests for readiness, bounded concurrency, cancellation, and shutdown as the corresponding mechanisms are introduced.
+The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets.
 
-The initial prototype uses a Tower service root as its composition, validates positive concurrency and queue capacities, and publishes complete versions with `ArcSwapOption`. `execute()` admits and selects a version synchronously when invoked and retains it through completion or future drop. Capacity is per version. A dropped future cancels its queue wait, while cancellation of dispatched work depends on the service. Netplane owns each Tower buffer worker and aborts it when its last endpoint and request future owner drops, including when the worker is stuck in service readiness. `shutdown(grace_period)` synchronously closes admission across all handles and waits for accepted request futures to finish or be dropped, including futures that have never been polled. Publication is rejected once shutdown starts. A timeout reports the outstanding count and leaves the runtime draining; another drain may be attempted. A successful drain clears the active graph so retained inactive handles do not own it. Shutdown does not forcibly reclaim resources held by an uncooperative user future or tasks spawned independently by a user service. There is no HTTP listener or deployment integration. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing are not initial requirements; add them only when a concrete use case justifies them.
+## Current limits and future work
+
+There is no global admission budget across versions or callers waiting for queue capacity. Validation checks positive capacities, not graph topology or application policy. There is no general-purpose graph construction API. Global admission budgeting, observability, a reconfiguration control API, HTTP integration, and broader graph composition are planned work; none are current guarantees. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation.
 
 ## Decisions
 

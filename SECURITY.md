@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Netplane is currently an unpublished library scaffold. Security fixes are applied to
+Netplane is currently an unpublished Rust library. Security fixes are applied to
 the `main` branch.
 
 | Version | Supported |
