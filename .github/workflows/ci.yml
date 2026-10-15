@@ -57,6 +57,24 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo package -p netplane
 
+  runtime-stress:
+    name: Runtime stress (${{ matrix.workers }} workers)
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: ${{ fromJSON(github.event_name == 'schedule' && '[2,4,8]' || '[4]') }}
+    runs-on: ubuntu-latest
+    env:
+      NETPLANE_STRESS_RUNS: ${{ github.event_name == 'schedule' && '1000' || '100' }}
+      NETPLANE_STRESS_THREADS: ${{ matrix.workers }}
+      NETPLANE_STRESS_SEED: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          toolchain: "1.88"
+      - run: cargo test -p netplane --test stress_randomized -- --nocapture
+
   dependency-policy:
     name: Dependency policy
     runs-on: ubuntu-latest
