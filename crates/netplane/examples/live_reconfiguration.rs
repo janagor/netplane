@@ -1,10 +1,18 @@
 //! Run with `cargo run -p netplane --example live_reconfiguration`.
 
-use std::{convert::Infallible, error::Error, io, time::Duration};
+use std::{
+    convert::Infallible,
+    error::Error,
+    future::{Ready, ready},
+    io,
+    sync::{Arc, Mutex},
+    task::{Context, Poll, Waker},
+    time::Duration,
+};
 use tokio::sync::oneshot;
-use tower::{ServiceBuilder, ServiceExt, filter::FilterLayer, service_fn};
+use tower::{BoxError, Service, ServiceBuilder, filter::FilterLayer, service_fn};
 
-use netplane::{Capacity, GraphDraft, Netplane, RuntimeLimits};
+use netplane::{Capacity, Endpoint, GraphDraft, GraphVersion, Netplane, RuntimeLimits};
 
 #[derive(Clone, Copy)]
 /// Request data used by both published compositions.
@@ -31,6 +39,117 @@ const CAPACITY: Capacity = Capacity {
     max_in_flight: 2,
     buffer_capacity: 4,
 };
+const BACKEND_CAPACITY: Capacity = Capacity {
+    max_in_flight: 1,
+    buffer_capacity: 1,
+};
+
+const fn routes_to_a(request: Request) -> bool {
+    request.key.is_multiple_of(2)
+}
+
+struct ReadinessGate {
+    state: Arc<Mutex<GateState>>,
+    polled: Option<oneshot::Sender<()>>,
+}
+
+struct GateState {
+    ready: bool,
+    waker: Option<Waker>,
+}
+
+impl ReadinessGate {
+    fn open(state: &Arc<Mutex<GateState>>) {
+        let waker = match state.lock() {
+            Ok(mut state) => {
+                state.ready = true;
+                state.waker.take()
+            }
+            Err(poisoned) => {
+                let mut state = poisoned.into_inner();
+                state.ready = true;
+                state.waker.take()
+            }
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+}
+
+impl Service<Request> for ReadinessGate {
+    type Response = String;
+    type Error = Infallible;
+    type Future = Ready<Result<String, Infallible>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if state.ready {
+            return Poll::Ready(Ok(()));
+        }
+        state.waker = Some(cx.waker().clone());
+        drop(state);
+        if let Some(polled) = self.polled.take() {
+            let _ = polled.send(());
+        }
+        Poll::Pending
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        ready(Ok(format!("A:{}", request.key)))
+    }
+}
+
+fn routed_graph() -> Result<
+    (
+        GraphVersion<Request, String>,
+        Arc<Mutex<GateState>>,
+        oneshot::Receiver<()>,
+    ),
+    BoxError,
+> {
+    let state = Arc::new(Mutex::new(GateState {
+        ready: false,
+        waker: None,
+    }));
+    let (polled_tx, polled_rx) = oneshot::channel();
+    let backend_a = Endpoint::new(
+        ReadinessGate {
+            state: state.clone(),
+            polled: Some(polled_tx),
+        },
+        BACKEND_CAPACITY,
+    )?;
+    let backend_b = Endpoint::new(
+        service_fn(
+            |request: Request| async move { Ok::<_, Infallible>(format!("B:{}", request.key)) },
+        ),
+        BACKEND_CAPACITY,
+    )?;
+    let router = service_fn(move |request: Request| {
+        let selected = if routes_to_a(request) {
+            backend_a.clone()
+        } else {
+            backend_b.clone()
+        };
+        async move { selected.execute(request).await }
+    });
+    let authorized_router = ServiceBuilder::new()
+        .layer(FilterLayer::new(|request: Request| {
+            request
+                .authorized
+                .then_some(request)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "unauthorized"))
+        }))
+        .service(router);
+    let graph = GraphDraft::new(authorized_router)
+        .capacity(CAPACITY)
+        .validate()?;
+    Ok((graph, state, polled_rx))
+}
 
 /// Execute one transition while an old-version request is in progress.
 ///
@@ -71,50 +190,23 @@ pub async fn run_demo() -> Result<Results, Box<dyn Error + Send + Sync>> {
     entered_rx.await?;
 
     // Version B checks simulated authorization, then routes even keys to A and odd keys to B.
-    let backend_a =
-        service_fn(
-            |request: Request| async move { Ok::<_, Infallible>(format!("A:{}", request.key)) },
-        );
-    let backend_b =
-        service_fn(
-            |request: Request| async move { Ok::<_, Infallible>(format!("B:{}", request.key)) },
-        );
-    let router = service_fn(move |request: Request| {
-        let a = backend_a;
-        let b = backend_b;
-        async move {
-            if request.key.is_multiple_of(2) {
-                a.oneshot(request).await
-            } else {
-                b.oneshot(request).await
-            }
-        }
-    });
-    let authorized_router = ServiceBuilder::new()
-        .layer(FilterLayer::new(|request: Request| {
-            request
-                .authorized
-                .then_some(request)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "unauthorized"))
-        }))
-        .service(router);
-    let graph_b = GraphDraft::new(authorized_router)
-        .capacity(CAPACITY)
-        .validate()?;
+    let (graph_b, state, polled_rx) = routed_graph()?;
     runtime.publish(graph_b)?;
 
-    let routed_a = handle
-        .execute(Request {
-            key: 2,
-            authorized: true,
-        })
-        .await?;
+    // A waits for readiness while B proceeds through its independent worker.
+    let routed_a = tokio::spawn(handle.execute(Request {
+        key: 2,
+        authorized: true,
+    }));
+    tokio::time::timeout(Duration::from_secs(5), polled_rx).await??;
     let routed_b = handle
         .execute(Request {
             key: 3,
             authorized: true,
         })
         .await?;
+    ReadinessGate::open(&state);
+    let routed_a = routed_a.await??;
     let rejected = match handle
         .execute(Request {
             key: 4,

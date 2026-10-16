@@ -27,7 +27,7 @@ Create another crate only when a concrete dependency or API boundary justifies i
 
 ## Implemented runtime
 
-The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets.
+The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets. An internal [composition prototype](adr/0004-graph-composition.md) uses sequential Tower middleware and request-aware routing to two independently owned, bounded backend endpoints. It does not add a public graph construction API.
 
 ## Current limits and future work
 
@@ -38,5 +38,6 @@ A positive runtime admission limit bounds accepted, unfinished requests across a
 - [ADR 0001: Tower service model](adr/0001-tower-service-model.md)
 - [ADR 0002: Runtime reconfiguration](adr/0002-runtime-reconfiguration.md)
 - [ADR 0003: Crate boundaries](adr/0003-crate-boundaries.md)
+- [ADR 0004: Internal graph composition prototype](adr/0004-graph-composition.md)
 
 Inherited tooling ADRs in `docs/adr/tooling/` are not Netplane runtime design decisions.

@@ -16,6 +16,7 @@ SOURCES=(
     docs/adr/0001-tower-service-model.md
     docs/adr/0002-runtime-reconfiguration.md
     docs/adr/0003-crate-boundaries.md
+    docs/adr/0004-graph-composition.md
     QUICKSTART.md
     SECURITY.md
 )
@@ -46,7 +47,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - Concurrency and buffer bounds are per version; the global admission budget bounds accepted, unfinished requests.
 - GraphDraft validates positive capacities, not topology or application policy.
 - There is no general-purpose graph construction API.
-- Observability, a reconfiguration control API, HTTP integration, and general graph composition are planned.
+- An internal two-backend composition prototype uses bounded endpoints; a public graph construction API, observability, a reconfiguration control API, and HTTP integration are planned.
 
 ## Workspace and authoritative documents
 
