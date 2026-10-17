@@ -20,6 +20,7 @@ cargo fmt --all -- --check
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo bench -p netplane --no-run
 ```
 
 `cargo test --workspace` includes documentation tests. If `cargo-nextest` is installed, use `cargo nextest run --workspace` for the test suite. Run `./scripts/quality-gates.sh` for the repository's broader local checks; it may require additional tools reported by the script.
@@ -29,6 +30,7 @@ Nix users can enter `nix develop`, then run the same Cargo commands. Toolchain c
 ## Where to work
 
 - `crates/netplane`: public library code with bounded execution, version publication, and shutdown admission.
+- `crates/netplane-http`: optional HTTP adapter, not a core runtime dependency.
 - `crates/xtask`: repository automation, not a runtime dependency.
 - `docs/architecture.md` and `docs/adr/`: design contract and decisions.
 - `AGENTS.md`: coding and review instructions.

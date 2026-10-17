@@ -12,6 +12,8 @@ Netplane builds on `tower::Service`. The core is transport independent and testa
 
 The design contract is in [docs/architecture.md](docs/architecture.md), with decisions recorded in [docs/adr](docs/adr). They distinguish current behavior from future requirements.
 
+The [performance guide](docs/performance.md) describes the core benchmark suite, its Tower comparisons, and how to reproduce the [measured baseline](docs/performance-baseline.md). The [API review](docs/api-readiness.md) and [release checklist](docs/release-readiness.md) track work remaining before any publication decision.
+
 ## Get started
 
 The repository pins Rust 1.88 in `rust-toolchain.toml`. See [QUICKSTART.md](QUICKSTART.md) for setup and verification commands.
@@ -20,6 +22,7 @@ The repository pins Rust 1.88 in `rust-toolchain.toml`. See [QUICKSTART.md](QUIC
 cargo build --workspace
 cargo test --workspace
 cargo run -p netplane --example live_reconfiguration
+cargo run -p netplane --example controlled_reconfiguration
 ```
 
 The workspace contains `crates/netplane` (the public library), `crates/netplane-http` (the optional HTTP adapter), and `crates/xtask` (development tooling). Dependencies are added only when used. `Cargo.lock` is ignored for this library workspace.

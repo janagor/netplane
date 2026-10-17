@@ -109,3 +109,19 @@ Netplane owns each Tower buffer worker. When a replaced version or stopped
 runtime loses its final endpoint and request future owner, Netplane aborts that
 worker. This also releases a service stuck in `poll_ready()`. Tasks spawned
 independently by a user service remain the service's responsibility.
+
+For serialized reconfiguration, put the runtime in `ReconfigurationController`.
+Use `inspect()` to obtain a coherent active version and token, validate a
+candidate outside the controller, then call `publish_if_current(token,
+candidate)`. A stale or foreign token fails without publication. The
+controller retains two displaced versions by default; `rollback_if_current`
+republishes one of those executable graphs with a fresh version ID while
+preserving the underlying service state. Its history limit is configurable
+through `ControllerOptions` and can be zero.
+The [controlled reconfiguration example](examples/controlled_reconfiguration.rs)
+shows the complete token, publish and rollback sequence.
+
+`GraphBuilder` supports a single router with named backends, not a general
+directed graph. `execute_until` and `try_execute_until` start an absolute Tokio
+deadline at invocation. Expiration drops Netplane's execution future, but any
+work independently retained by the Tower service can continue.

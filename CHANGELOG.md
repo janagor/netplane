@@ -1,36 +1,18 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+Netplane has not been released. Version and workspace manifests remain at `0.0.0`, and the crates are private to this repository until an explicit release decision.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## Unreleased
 
 ### Added
 
-- for new features.
+- Criterion benchmarks for direct and bounded Tower execution, Netplane execution, concurrency, routing, admission, publication and selected lifecycle operations.
+- Concurrent caller benchmarks for both single-task batched in-flight work and independently scheduled multi-task callers.
+- Tower double-buffered router baseline, route-label lookup isolation and a yield-once serial execution path.
+- Latency and resource probes with explicit `batched`/`tasks` and `paced`/`burst` modes.
+- Performance methodology and a first local execution baseline.
+- External-consumer API tests for the core crate and optional HTTP adapter, plus benchmark compilation in CI on Rust 1.88.
 
-### Changed
+### Documentation
 
-- Promoted `pedantic` and `nursery` clippy lint groups from `allow` to `warn` at workspace level. Individual crates use local `[lints.clippy]` overrides where needed (Cargo 1.88 limitation).
-- Expanded `tokio` features in `checkpoint-template` to include `rt-multi-thread`, `macros`, and `sync` (needed for `#[tokio::test]`).
-
-### Deprecated
-
-- (none)
-
-### Removed
-
-- Removed root `[features]` demo block (`cli`, `persistence`, `parallel`, `wasm`, `tracing-json`, `tracing-opentelemetry`) and optional `tokio` dependency from the root crate.
-- Removed `redb` optional dependency and `kv` feature from `hybrid-storage-template`. Template users relying on `--features kv` should add `redb` directly to their project.
-
-### Fixed
-
-- Added `.cargo/audit.toml` to ignore unfixable `rustls-webpki 0.102.8` transitive advisories (RUSTSEC-2026-0049/0099/0104/0098), blocked upstream by `libsql 0.9` → `rustls 0.22`.
-
-### Security
-
-- (none)
-
-[Unreleased]: https://github.com/your-org/your-repo/compare/v0.0.0...HEAD
+- Release-readiness checklist and updated core crate guidance for routing, controller publication, deadlines and rollback.

@@ -10,8 +10,11 @@ homepage.workspace = true
 documentation.workspace = true
 readme = "README.md"
 description = "A composable Rust networking runtime built on Tower, providing dynamically reconfigurable service graphs with explicit lifecycle, backpressure, and cancellation semantics."
-include = ["/src", "README.md", "LICENSE"]
+include = ["/src", "/tests", "/examples", "/benches", "README.md", "LICENSE"]
 publish = false
+
+[lib]
+bench = false
 
 [lints]
 workspace = true
@@ -25,6 +28,24 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
+futures-util.workspace = true
 tracing-subscriber = { version = "0.3", features = ["registry", "fmt", "env-filter"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tower = { workspace = true, features = ["filter"] }
+
+[[bench]]
+name = "execution"
+harness = false
+
+[[bench]]
+name = "concurrency"
+harness = false
+
+[[bench]]
+name = "routing"
+harness = false
+
+[[bench]]
+name = "lifecycle"
+harness = false

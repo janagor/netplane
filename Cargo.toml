@@ -84,6 +84,7 @@ cognitive_complexity = "allow"
 
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 tracing = "0.1"
 axum = "0.8"
 http = "1"
