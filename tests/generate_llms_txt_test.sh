@@ -16,6 +16,7 @@ SOURCES=(
     docs/adr/0002-runtime-reconfiguration.md
     docs/adr/0003-crate-boundaries.md
     docs/adr/0004-graph-composition.md
+    docs/adr/0005-reconfiguration-control.md
     QUICKSTART.md
     SECURITY.md
 )

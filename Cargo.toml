@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/netplane", "crates/xtask"]
+members = ["crates/netplane", "crates/netplane-http", "crates/xtask"]
 default-members = ["crates/netplane"]
 resolver = "3"
 exclude = ["fuzz"]
@@ -85,6 +85,12 @@ cognitive_complexity = "allow"
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
 tracing = "0.1"
+axum = "0.8"
+http = "1"
+http-body-util = "0.1"
+httparse = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+bytes = "1"
 arc-swap = "1"
 pin-project-lite = "0.2"
 thiserror = "2"

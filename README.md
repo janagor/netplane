@@ -1,12 +1,14 @@
 # Netplane
 
+The optional `netplane-http` workspace crate serves buffered HTTP requests through a Netplane handle. It bounds body size, body read concurrency, and read time, then rejects oversized encoded responses. See `crates/netplane-http/examples/reconfigure.rs` for a persistent listener with process-local graph publication.
+
 Netplane is an early stage Rust library for constructing and managing dynamically reconfigurable Tower service graphs. It aims to make graph publication, request lifetime, readiness, backpressure, and cancellation behavior explicit.
 
 The repository provides bounded Tower service endpoints, atomic publication of validated execution versions, graceful shutdown, and development tooling. Accepted requests retain the version selected at invocation. Successful shutdown releases the active graph, even when handles remain. Version `0.0.0` marks this pre-release stage; the crate is not published.
 
 ## Scope
 
-Netplane builds on `tower::Service`. The core is intended to be transport independent and testable with in-memory services. HTTP adapters and deployment integrations can be added later, behind real dependency boundaries. Netplane is not a standalone HTTP proxy or a replacement async runtime.
+Netplane builds on `tower::Service`. The core is transport independent and testable with in-memory services. The optional HTTP adapter has its own crate; deployment integrations can be added behind real dependency boundaries. Netplane is not a standalone HTTP proxy or a replacement async runtime.
 
 The design contract is in [docs/architecture.md](docs/architecture.md), with decisions recorded in [docs/adr](docs/adr). They distinguish current behavior from future requirements.
 
@@ -20,7 +22,7 @@ cargo test --workspace
 cargo run -p netplane --example live_reconfiguration
 ```
 
-The workspace contains `crates/netplane` (the public library) and `crates/xtask` (development tooling). Dependencies are added only when used. `Cargo.lock` is ignored for this library workspace.
+The workspace contains `crates/netplane` (the public library), `crates/netplane-http` (the optional HTTP adapter), and `crates/xtask` (development tooling). Dependencies are added only when used. `Cargo.lock` is ignored for this library workspace.
 
 ## Contribute
 

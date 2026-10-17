@@ -1,5 +1,7 @@
 # Quick start
 
+HTTP example: `cargo run -p netplane-http --example reconfigure`. Start `curl http://127.0.0.1:3000/a` in another terminal; it waits on v1. Press Enter in the example terminal to publish v2. A second `curl http://127.0.0.1:3000/a` returns v2 while the first still waits. Press Enter again to release the v1 request, then Ctrl-C to stop the listener and drain Netplane.
+
 Netplane is a Rust library workspace. Its library crate provides bounded Tower service endpoints, atomic publication of immutable execution versions, and bounded graceful draining.
 
 ## Prerequisites

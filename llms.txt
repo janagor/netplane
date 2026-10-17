@@ -10,17 +10,21 @@
 - Synchronous version selection at Handle::execute() invocation; accepted requests retain that version until completion or future drop.
 - Global synchronous admission limit across handles and versions, including unpolled futures.
 - Queued-request cancellation, worker cleanup, and graceful, retryable shutdown draining.
+- GraphBuilder's validated single-router composition over named Tower services and middleware.
+- ReconfigurationController publication, rollback history, and structured runtime tracing.
+- Optional netplane-http adapter with bounded body ingress and live listener reconfiguration.
 
 ## Limits and planned work
 
 - Concurrency and buffer bounds are per version; the global admission budget bounds accepted, unfinished requests.
 - GraphDraft validates positive capacities, not topology or application policy.
-- There is no general-purpose graph construction API.
-- An internal two-backend composition prototype uses bounded endpoints; a public graph construction API, observability, a reconfiguration control API, and HTTP integration are planned.
+- GraphBuilder supports one validated router; arbitrary graph topology and application policy validation remain future work.
+- HTTP ingress bounds begin after request headers are parsed. Encoded response size is checked after encoding.
 
 ## Workspace and authoritative documents
 
 - [crates/netplane](crates/netplane/): Public runtime library; transport and deployment independent.
+- [crates/netplane-http](crates/netplane-http/): Optional HTTP adapter; depends on the core runtime.
 - [crates/xtask](crates/xtask/): Development tooling; never a runtime dependency.
 - [README.md](README.md): Project overview and local commands.
 - [AGENTS.md](AGENTS.md): Coding contract and runtime invariants.

@@ -32,6 +32,6 @@ Calling `ReconfigurationController::shutdown` closes admission under its control
 
 ## Outside the current runtime
 
-The runtime emits [structured tracing events](../observability.md) for admission, completion, cancellation, validation, publication, worker termination, and shutdown. Accepted-to-terminal duration includes any time before the first poll. A replaced version is released only after its last owner drops.
+The runtime emits [structured tracing events](../observability.md) for admission, completion, cancellation, validation, publication, worker termination, and shutdown. Accepted-to-terminal duration includes any time before the first poll. A replaced version is released only after its last owner drops. The optional `netplane-http` adapter selects a version after bounded body collection and decoding. A disconnected client need not immediately drop its handler, and dispatched service work may survive handler cancellation.
 
-`version.released` means a publication wrapper lost its last owner. A rollback can make two publication IDs share one executable graph, so this event alone does not prove that its Tower workers were destroyed. Arbitrary graph construction, policy validation, and HTTP integration remain future work.
+`version.released` means a publication wrapper lost its last owner. A rollback can make two publication IDs share one executable graph, so this event alone does not prove that its Tower workers were destroyed. Arbitrary graph construction and policy validation remain future work.

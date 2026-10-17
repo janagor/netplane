@@ -20,10 +20,11 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 | Path | Responsibility |
 | --- | --- |
 | `crates/netplane` | Public, transport-independent runtime library. Keep its public dependency surface small. |
+| `crates/netplane-http` | Optional bounded HTTP ingress and Axum listener integration; depends on `netplane`. |
 | `crates/xtask` | Build and quality automation. Never a runtime dependency of `netplane`. |
 | `docs/adr` | Accepted architectural decisions and their consequences. |
 
-Create another crate only when a concrete dependency or API boundary justifies it. A future transport adapter may depend on the core; the core must not depend on that adapter.
+The HTTP adapter is a separate crate because body buffering, status mapping, and listener integration require protocol dependencies. The core does not depend on it.
 
 ## Implemented runtime
 
@@ -31,7 +32,7 @@ The in-memory runtime accepts a Tower service root, bounds its concurrency and b
 
 ## Current limits and future work
 
-A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. `GraphDraft` validates capacities only. `GraphBuilder` validates its declared single-router topology and capacities, but cannot prove application policy or selector behavior. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation. Structured tracing events are documented in [Runtime observability](observability.md). `ReconfigurationController` provides conditional publication, bounded rollback history, and inspection. HTTP integration remains future work.
+A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. `GraphDraft` validates capacities only. `GraphBuilder` validates its declared single-router topology and capacities, but cannot prove application policy or selector behavior. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation. Structured tracing events are documented in [Runtime observability](observability.md). `ReconfigurationController` provides conditional publication, bounded rollback history, and inspection. The optional HTTP adapter reads and decodes bounded bodies before selecting a version through `try_execute`.
 
 ## Decisions
 
