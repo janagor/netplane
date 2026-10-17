@@ -18,6 +18,11 @@ Netplane emits structured `tracing` events with target `netplane`. The library d
 | `version.endpoint` | DEBUG | `runtime_id`, `version_id`, `endpoint_id` | Associates a published version with each of its endpoint workers. |
 | `version.released` | DEBUG | `runtime_id`, `version_id` | Final published-version reference dropped. |
 | `version.publish_rejected` | DEBUG or WARN | `runtime_id`, `reason` | `shutting_down` is DEBUG; `generation_exhausted` is WARN. |
+| `reconfiguration.published` | INFO | `runtime_id`, `old_version`, `new_version` | Successful controller publication. |
+| `reconfiguration.rejected` | DEBUG | `runtime_id`, `reason`, optional `expected`, `actual`, `source` | Rejected controller operation. |
+| `reconfiguration.rollback` | INFO | `runtime_id`, `source`, `new_version` | Historical executable republished under a fresh generation. |
+| `reconfiguration.history_evicted` | DEBUG | `runtime_id`, `evicted_version` | Controller removed its oldest retained reference. |
+| `reconfiguration.history_cleared` | DEBUG | `runtime_id`, `retained_count` | Shutdown removed controller history. |
 | `shutdown.started` | INFO | `runtime_id`, `shutdown_attempt_id`, `grace_period_ms`, `outstanding` | Admission closed. |
 | `shutdown.completed` | INFO | `runtime_id`, `shutdown_attempt_id`, `duration_ms` | Drain completed. |
 | `shutdown.timed_out` | WARN | `runtime_id`, `shutdown_attempt_id`, `duration_ms`, `remaining` | Deadline expired; remaining count sampled at resolution. |
@@ -31,7 +36,9 @@ The `netplane.request` span covers polling of the caller's execution future. Tow
 
 Runtime, request, endpoint, and shutdown attempt IDs use process-local `u64` counters. Exhaustion of those counters is outside the supported operational lifetime. Publication generations are checked and reject publication before reuse.
 
-The publisher emits `version.published`, `version.replaced`, and `version.endpoint` before it releases its old-version reference. Requests and other owners can release references concurrently, so there is no total ordering guarantee across threads. A worker may terminate for a validated candidate that was never published; in that case no `version.endpoint` event associates its `endpoint_id` with a publication.
+The publisher emits `version.published`, `version.replaced`, and `version.endpoint` before it releases its old-version reference. Requests and other owners can release references concurrently, so there is no total ordering guarantee across threads. `version.released` records the loss of one publication wrapper, not necessarily destruction of its executable graph: a rollback can make several publication wrappers share that graph. A worker may terminate for a validated candidate that was never published; in that case no `version.endpoint` event associates its `endpoint_id` with a publication.
+
+Controller publication and shutdown-start events are emitted after releasing the control mutex so subscribers may inspect the controller. Concurrent operations can therefore deliver events out of generation order: an event for version 3 may arrive before one for version 2, and a publication event may arrive after `shutdown.started` even when that publication won the lock first. Reconstruct publication order using `(runtime_id, new_version)`, not event delivery order. Rejection events include `source` only for an unavailable rollback target and omit `actual` when no active publication exists.
 
 Default events contain no request, response, header, selector output, graph name, or arbitrary error text. Netplane's worker event omits panic payloads, but Rust's panic hook or an application-installed hook may independently print them to stderr. Dropping a dispatched request does not guarantee termination of independently spawned service work.
 

@@ -11,6 +11,34 @@ use pin_project_lite::pin_project;
 use tower::BoxError;
 use tracing::Dispatch;
 
+use crate::{PublishError, VersionId};
+
+pub fn trace_publish_rejection(runtime_id: u64, error: &PublishError) {
+    match error {
+        PublishError::ShuttingDown => {
+            tracing::debug!(target: "netplane", event = "version.publish_rejected", runtime_id, reason = "shutting_down");
+        }
+        PublishError::GenerationExhausted => {
+            tracing::warn!(target: "netplane", event = "version.publish_rejected", runtime_id, reason = "generation_exhausted");
+        }
+    }
+}
+
+pub fn trace_publication(
+    runtime_id: u64,
+    previous: VersionId,
+    published: VersionId,
+    endpoint_ids: &[u64],
+) {
+    let old_version = previous.get();
+    let new_version = published.get();
+    tracing::info!(target: "netplane", event = "version.published", runtime_id, old_version, new_version);
+    tracing::debug!(target: "netplane", event = "version.replaced", runtime_id, old_version, new_version);
+    for &endpoint_id in endpoint_ids {
+        tracing::debug!(target: "netplane", event = "version.endpoint", runtime_id, version_id = new_version, endpoint_id);
+    }
+}
+
 const INITIAL_RUNTIME_ID: u64 = 1;
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(INITIAL_RUNTIME_ID);
 
@@ -124,5 +152,23 @@ pub const fn observe<F, R>(
         inner,
         observation,
         retained: Some(retained),
+    }
+}
+pub struct ShutdownStarted {
+    pub(crate) runtime_id: u64,
+    pub(crate) attempt_id: u64,
+    pub(crate) grace_period_ms: u64,
+    pub(crate) outstanding: usize,
+}
+
+impl ShutdownStarted {
+    pub(crate) fn emit(self) {
+        let Self {
+            runtime_id,
+            attempt_id: shutdown_attempt_id,
+            grace_period_ms,
+            outstanding,
+        } = self;
+        tracing::info!(target: "netplane", event = "shutdown.started", runtime_id, shutdown_attempt_id, grace_period_ms, outstanding);
     }
 }

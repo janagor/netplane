@@ -16,7 +16,12 @@ use std::{
 };
 
 use arc_swap::ArcSwapOption;
+mod controller;
 mod endpoint;
+pub use controller::{
+    ControllerError, ControllerOptions, ControllerSnapshot, PublicationKind,
+    ReconfigurationController, ReconfigurationOutcome, VersionSnapshot, VersionToken,
+};
 mod graph;
 pub use endpoint::Endpoint;
 mod lifecycle;
@@ -26,7 +31,7 @@ pub use graph::{
 };
 use lifecycle::Admission;
 pub use lifecycle::{AdmissionError, DrainError};
-use observability::{RequestObservation, observe};
+use observability::{RequestObservation, observe, trace_publication, trace_publish_rejection};
 use thiserror::Error;
 use tower::{BoxError, Service};
 
@@ -103,7 +108,7 @@ struct PublishedVersion<Request: Send, Response> {
     id: VersionId,
     runtime_id: u64,
     dispatch: tracing::Dispatch,
-    graph: GraphVersion<Request, Response>,
+    graph: Arc<GraphVersion<Request, Response>>,
 }
 
 impl<Request: Send, Response> Drop for PublishedVersion<Request, Response> {
@@ -227,7 +232,7 @@ where
             id: version_id,
             runtime_id,
             dispatch,
-            graph: version,
+            graph: Arc::new(version),
         };
         tracing::info!(target: "netplane", event = "version.published", runtime_id, old_version = NO_PREVIOUS_VERSION, new_version = version_id.get());
         for &endpoint_id in &published.graph.endpoint_ids {
@@ -270,31 +275,47 @@ where
         &mut self,
         version: GraphVersion<Request, Response>,
     ) -> Result<(), PublishError> {
+        let endpoint_ids = version.endpoint_ids.clone();
+        let graph = Arc::new(version);
+        let previous = match self.publish_retaining(&graph) {
+            Ok(previous) => previous,
+            Err(error) => {
+                trace_publish_rejection(self.runtime_id, &error);
+                return Err(error);
+            }
+        };
+        trace_publication(
+            self.runtime_id,
+            previous.id,
+            VersionId(self.generation),
+            &endpoint_ids,
+        );
+        drop(previous);
+        Ok(())
+    }
+
+    fn publish_retaining(
+        &mut self,
+        graph: &Arc<GraphVersion<Request, Response>>,
+    ) -> Result<Arc<PublishedVersion<Request, Response>>, PublishError> {
         if !self.admission.can_publish() {
-            tracing::debug!(target: "netplane", event = "version.publish_rejected", runtime_id = self.runtime_id, reason = "shutting_down");
             return Err(PublishError::ShuttingDown);
         }
         let Some(next) = self.generation.checked_add(1) else {
-            tracing::warn!(target: "netplane", event = "version.publish_rejected", runtime_id = self.runtime_id, reason = "generation_exhausted");
             return Err(PublishError::GenerationExhausted);
         };
-        let old_version = self.generation;
+        let previous = self.active.load_full().ok_or(PublishError::ShuttingDown)?;
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let next_version = Arc::new(PublishedVersion {
             id: VersionId(next),
             runtime_id: self.runtime_id,
             dispatch,
-            graph: version,
+            graph: Arc::clone(graph),
         });
-        let previous = self.active.swap(Some(Arc::clone(&next_version)));
+        let displaced = self.active.swap(Some(next_version));
         self.generation = next;
-        tracing::info!(target: "netplane", event = "version.published", runtime_id = self.runtime_id, old_version, new_version = next);
-        tracing::debug!(target: "netplane", event = "version.replaced", runtime_id = self.runtime_id, old_version, new_version = next);
-        for &endpoint_id in &next_version.graph.endpoint_ids {
-            tracing::debug!(target: "netplane", event = "version.endpoint", runtime_id = self.runtime_id, version_id = next, endpoint_id);
-        }
-        drop(previous);
-        Ok(())
+        drop(displaced);
+        Ok(previous)
     }
 
     /// Close admission immediately and drain accepted request futures.
@@ -315,6 +336,18 @@ where
         grace_period: Duration,
     ) -> impl Future<Output = Result<(), DrainError>> + Send + 'static + use<Request, Response>
     {
+        let (drain, event) = self.shutdown_preparing(grace_period);
+        event.emit();
+        drain
+    }
+
+    fn shutdown_preparing(
+        &mut self,
+        grace_period: Duration,
+    ) -> (
+        impl Future<Output = Result<(), DrainError>> + Send + 'static + use<Request, Response>,
+        observability::ShutdownStarted,
+    ) {
         let mut counts = self.admission.close();
         let admission = Arc::clone(&self.admission);
         let active = Arc::clone(&self.active);
@@ -326,8 +359,13 @@ where
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let grace_period_ms = u64::try_from(grace_period.as_millis()).unwrap_or(u64::MAX);
         let outstanding = admission.outstanding();
-        tracing::info!(target: "netplane", event = "shutdown.started", runtime_id, shutdown_attempt_id, grace_period_ms, outstanding);
-        async move {
+        let event = observability::ShutdownStarted {
+            runtime_id,
+            attempt_id: shutdown_attempt_id,
+            grace_period_ms,
+            outstanding,
+        };
+        let drain = async move {
             let drain = async {
                 while *counts.borrow_and_update() != 0 {
                     if counts.changed().await.is_err() {
@@ -351,7 +389,8 @@ where
                 });
                 Err(DrainError::TimedOut { remaining })
             }
-        }
+        };
+        (drain, event)
     }
 }
 
