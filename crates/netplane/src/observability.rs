@@ -11,7 +11,7 @@ use pin_project_lite::pin_project;
 use tower::BoxError;
 use tracing::Dispatch;
 
-use crate::{PublishError, VersionId};
+use crate::{DeadlineExceeded, PublishError, VersionId};
 
 pub fn trace_publish_rejection(runtime_id: u64, error: &PublishError) {
     match error {
@@ -90,7 +90,9 @@ impl RequestObservation {
         tracing::dispatcher::with_default(&self.dispatch, || {
             let _entered = self.span.enter();
             if let Some(error) = error {
-                let error_kind = if error.is::<tower::buffer::error::Closed>() {
+                let error_kind = if error.is::<DeadlineExceeded>() {
+                    "deadline_exceeded"
+                } else if error.is::<tower::buffer::error::Closed>() {
                     "buffer_closed"
                 } else {
                     "service_error"

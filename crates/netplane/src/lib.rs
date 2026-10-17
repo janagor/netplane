@@ -8,10 +8,7 @@
 
 use std::{
     future::Future,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
@@ -23,6 +20,7 @@ pub use controller::{
     ReconfigurationController, ReconfigurationOutcome, VersionSnapshot, VersionToken,
 };
 mod graph;
+mod handle;
 pub use endpoint::Endpoint;
 mod lifecycle;
 mod observability;
@@ -31,7 +29,7 @@ pub use graph::{
 };
 use lifecycle::Admission;
 pub use lifecycle::{AdmissionError, DrainError};
-use observability::{RequestObservation, observe, trace_publication, trace_publish_rejection};
+use observability::{trace_publication, trace_publish_rejection};
 use thiserror::Error;
 use tower::{BoxError, Service};
 
@@ -91,6 +89,14 @@ pub enum PublishError {
     #[error("publication generation exhausted")]
     GenerationExhausted,
 }
+
+/// A request's execution deadline elapsed.
+///
+/// The Netplane execution future is cancelled. Work independently retained by
+/// the underlying service may continue after this error is returned.
+#[derive(Debug, Error)]
+#[error("request deadline exceeded")]
+pub struct DeadlineExceeded;
 
 /// Publication generation within one Netplane runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -409,68 +415,6 @@ impl<Request: Send, Response> Clone for Handle<Request, Response> {
             admission: Arc::clone(&self.admission),
             runtime_id: self.runtime_id,
             next_request_id: Arc::clone(&self.next_request_id),
-        }
-    }
-}
-
-impl<Request, Response> Handle<Request, Response>
-where
-    Request: Send + 'static,
-    Response: Send + 'static,
-{
-    /// Admit a request and select its version synchronously.
-    ///
-    /// The accepted future holds one global slot and its selected version until
-    /// it completes or is dropped. Dropping it cancels its queue wait; a
-    /// dispatched service determines whether its work can be canceled.
-    ///
-    /// # Errors
-    /// Returns [`AdmissionError::Closed`] after shutdown begins, or
-    /// [`AdmissionError::AtCapacity`] when the global budget is full.
-    pub fn try_execute(
-        &self,
-        request: Request,
-    ) -> Result<
-        impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>,
-        AdmissionError,
-    > {
-        let guard = match self.admission.try_admit() {
-            Ok(guard) => guard,
-            Err(AdmissionError::Closed) => {
-                tracing::debug!(target: "netplane", event = "request.rejected", runtime_id = self.runtime_id, reason = "admission_closed");
-                return Err(AdmissionError::Closed);
-            }
-            Err(AdmissionError::AtCapacity { limit }) => {
-                tracing::warn!(target: "netplane", event = "request.rejected", runtime_id = self.runtime_id, reason = "capacity_exceeded", outstanding_limit = limit);
-                return Err(AdmissionError::AtCapacity { limit });
-            }
-        };
-        let version = self.active.load_full().ok_or(AdmissionError::Closed)?;
-        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
-        let observation = RequestObservation::new(self.runtime_id, version.id.get(), request_id);
-        let execution = version.graph.endpoint.execute(request);
-        Ok(observe(execution, observation, (version, guard)))
-    }
-
-    /// Admit the request now and return a future that executes it.
-    ///
-    /// Admission errors are boxed into the returned future's result. The
-    /// accepted future releases its slot on completion or drop.
-    ///
-    /// # Errors
-    /// Returns a boxed [`AdmissionError`] for overload or shutdown, or a
-    /// service or buffer worker error after admission.
-    pub fn execute(
-        &self,
-        request: Request,
-    ) -> impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>
-    {
-        let selected = self.try_execute(request);
-        async move {
-            match selected {
-                Ok(execution) => execution.await,
-                Err(error) => Err(Box::new(error) as BoxError),
-            }
         }
     }
 }

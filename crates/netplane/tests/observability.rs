@@ -8,7 +8,8 @@ use std::{
 };
 
 use netplane::{
-    Capacity, GraphBuilder, GraphDraft, Netplane, PublishError, RuntimeLimits, VersionId,
+    Capacity, DeadlineExceeded, GraphBuilder, GraphDraft, Netplane, PublishError, RuntimeLimits,
+    VersionId,
 };
 use tower::service_fn;
 use tracing::{
@@ -88,6 +89,50 @@ fn event_position(events: &[Fields], event: &str) -> Option<usize> {
     events
         .iter()
         .position(|fields| -> bool { contains(std::slice::from_ref(fields), event, None) })
+}
+
+#[tokio::test(start_paused = true)]
+async fn deadline_has_one_distinct_terminal_event() -> TestResult {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Events(Arc::clone(&captured)));
+    let _scope = tracing::subscriber::set_default(subscriber);
+    let runtime = Netplane::new(graph()?, RuntimeLimits { max_outstanding: 1 })?;
+    let version = runtime.active_version_id().ok_or("missing version")?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let pending = runtime.handle().try_execute_until(1, deadline)?;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert!(matches!(pending.await, Err(error) if error.is::<DeadlineExceeded>()));
+    let events = captured
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert_eq!(count(&events, "request.failed", version), 1);
+    assert_eq!(count(&events, "request.cancelled", version), 0);
+    assert!(field_is(
+        &events,
+        "request.failed",
+        "error_kind",
+        "\"deadline_exceeded\""
+    ));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn dropped_deadline_future_emits_cancellation_only() -> TestResult {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Events(Arc::clone(&captured)));
+    let _scope = tracing::subscriber::set_default(subscriber);
+    let runtime = Netplane::new(graph()?, RuntimeLimits { max_outstanding: 1 })?;
+    let version = runtime.active_version_id().ok_or("missing version")?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let pending = runtime.handle().try_execute_until(1, deadline)?;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    drop(pending);
+    let events = captured
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert_eq!(count(&events, "request.cancelled", version), 1);
+    assert_eq!(count(&events, "request.failed", version), 0);
+    Ok(())
 }
 
 #[tokio::test]

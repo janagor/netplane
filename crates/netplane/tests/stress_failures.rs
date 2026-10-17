@@ -143,9 +143,52 @@ async fn unexpected_worker_termination_wakes_all_accepted_callers() -> TestResul
         for future in futures {
             assert!(future.await.is_err());
         }
+        assert!(handle.try_execute(9)?.await.is_err());
         let next = GraphDraft::new(FailingService { ready_fails: false }).validate()?;
         runtime.publish(next)?;
         assert_eq!(handle.execute(7).await?, 7);
+        runtime.shutdown(Duration::from_secs(1)).await?;
+        Ok::<_, Box<dyn Error + Send + Sync>>(())
+    })
+    .await??;
+    Ok(())
+}
+
+struct PanicsDuringCall;
+
+impl Service<usize> for PanicsDuringCall {
+    type Response = usize;
+    type Error = Failure;
+    type Future = Pin<Box<dyn Future<Output = Result<usize, Failure>> + Send>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _: usize) -> Self::Future {
+        std::panic::resume_unwind(Box::new("injected call termination"))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn call_panic_releases_pending_callers_and_replacement_recovers() -> TestResult {
+    timeout(Duration::from_secs(5), async {
+        let first = GraphDraft::new(PanicsDuringCall).validate()?;
+        let mut runtime = Netplane::new(first, RuntimeLimits { max_outstanding: 8 })?;
+        let handle = runtime.handle();
+        let pending: Vec<_> = (0..8)
+            .map(|id| handle.try_execute(id))
+            .collect::<Result<_, _>>()?;
+        assert!(matches!(
+            handle.try_execute(9),
+            Err(AdmissionError::AtCapacity { limit: 8 })
+        ));
+        for request in pending {
+            assert!(request.await.is_err());
+        }
+        assert!(handle.try_execute(9)?.await.is_err());
+        runtime.publish(GraphDraft::new(FailingService { ready_fails: false }).validate()?)?;
+        assert_eq!(handle.try_execute(11)?.await?, 11);
         runtime.shutdown(Duration::from_secs(1)).await?;
         Ok::<_, Box<dyn Error + Send + Sync>>(())
     })

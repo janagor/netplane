@@ -1,22 +1,92 @@
 //! Concurrent publication and synchronous request-version selection.
+#[path = "common/drop.rs"]
+mod cleanup;
 mod common;
 
 use std::{
     convert::Infallible,
     error::Error,
+    future::Future,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    task::Poll,
     time::Duration,
 };
 
+use cleanup::wait_for_drop;
 use common::{CAPACITY, DEADLINE, Reply, graph};
 use netplane::{ConfigError, GraphDraft, GraphVersion, Netplane, RuntimeLimits};
 use tokio::{sync::Barrier, time::timeout};
 use tower::service_fn;
 
 type TestResult = Result<(), Box<dyn Error + Send + Sync>>;
+
+#[tokio::test]
+async fn completed_future_does_not_retain_old_worker() -> TestResult {
+    timeout(DEADLINE, async {
+        let (first, gate) = graph(0, CAPACITY)?;
+        gate.permits.add_permits(1);
+        let mut runtime = Netplane::new(first, RuntimeLimits { max_outstanding: 1 })?;
+        let handle = runtime.handle();
+        let mut completed = Box::pin(handle.try_execute(1)?);
+        let response = std::future::poll_fn(|cx| match completed.as_mut().poll(cx) {
+            Poll::Ready(result) => Poll::Ready(result),
+            Poll::Pending => Poll::Pending,
+        })
+        .await?;
+        assert_eq!(response.version, 0);
+        let (next, _) = graph(1, CAPACITY)?;
+        runtime.publish(next)?;
+        wait_for_drop(&gate.dropped, 1).await;
+        drop(completed);
+        Ok::<_, Box<dyn Error + Send + Sync>>(())
+    })
+    .await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn publication_stress_retains_and_releases_selected_versions() -> TestResult {
+    const VERSIONS: usize = 200;
+    timeout(Duration::from_secs(10), async {
+        let (first, mut gate) = graph(0, CAPACITY)?;
+        let mut runtime = Netplane::new(
+            first,
+            RuntimeLimits {
+                max_outstanding: VERSIONS,
+            },
+        )?;
+        let handle = runtime.handle();
+        let mut retained = Vec::with_capacity(VERSIONS);
+        let mut gates = Vec::with_capacity(VERSIONS);
+        for version in 0..VERSIONS {
+            retained.push(handle.try_execute(version)?);
+            gates.push(Arc::clone(&gate.dropped));
+            if version + 1 < VERSIONS {
+                let (next, next_gate) = graph(version + 1, CAPACITY)?;
+                runtime.publish(next)?;
+                gate = next_gate;
+            }
+        }
+        assert!(
+            gates
+                .iter()
+                .all(|drop_count| drop_count.load(Ordering::SeqCst) == 0)
+        );
+        drop(retained);
+        for drop_count in gates.iter().take(VERSIONS - 1) {
+            wait_for_drop(drop_count, 1).await;
+        }
+        assert_eq!(gates[VERSIONS - 1].load(Ordering::SeqCst), 0);
+        runtime.shutdown(Duration::from_secs(1)).await?;
+        wait_for_drop(&gates[VERSIONS - 1], 1).await;
+        Ok::<_, Box<dyn Error + Send + Sync>>(())
+    })
+    .await??;
+    Ok(())
+}
 
 #[tokio::test]
 async fn accepted_requests_keep_their_version_across_multiple_publications() -> TestResult {
