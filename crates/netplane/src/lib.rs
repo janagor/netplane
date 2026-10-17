@@ -8,25 +8,32 @@
 
 use std::{
     future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
 use arc_swap::ArcSwapOption;
+mod endpoint;
 mod graph;
+pub use endpoint::Endpoint;
 mod lifecycle;
+mod observability;
 pub use graph::{
     GraphBuildError, GraphBuilder, GraphMetadata, NodeKind, NodeMetadata, RouteMetadata,
 };
 use lifecycle::Admission;
 pub use lifecycle::{AdmissionError, DrainError};
-use pin_project_lite::pin_project;
+use observability::{RequestObservation, observe};
 use thiserror::Error;
-use tower::{
-    BoxError, Service, ServiceExt, buffer::Buffer, limit::ConcurrencyLimit, util::BoxService,
-};
+use tower::{BoxError, Service};
+
+const INITIAL_GENERATION: u64 = 1;
+const NO_PREVIOUS_VERSION: u64 = 0;
+const INITIAL_REQUEST_ID: u64 = 1;
+const INITIAL_SHUTDOWN_ATTEMPT_ID: u64 = 1;
 
 /// Capacity settings for one endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,122 +68,51 @@ pub enum ConfigError {
     ZeroOutstanding,
 }
 
+const fn config_error_kind(error: &ConfigError) -> &'static str {
+    match error {
+        ConfigError::ZeroConcurrency => "zero_concurrency",
+        ConfigError::ZeroBuffer => "zero_buffer",
+        ConfigError::ZeroOutstanding => "zero_outstanding",
+    }
+}
+
 /// A graph version could not be published.
 #[derive(Debug, Error)]
 pub enum PublishError {
     /// Shutdown has already begun.
     #[error("cannot publish after shutdown has started")]
     ShuttingDown,
+    /// No unused publication generation remains.
+    #[error("publication generation exhausted")]
+    GenerationExhausted,
 }
 
-type BoxedResponse<Response> = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send>>;
+/// Publication generation within one Netplane runtime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct VersionId(u64);
 
-/// A cloneable handle to one bounded Tower service composition.
-///
-/// Construct this inside a Tokio runtime. A worker owns the service and polls
-/// readiness before calling it. Dropping an execution future cancels its wait;
-/// cancellation of an already dispatched call depends on the service. The
-/// worker is aborted after its last endpoint and execution future owner drops.
-pub struct Endpoint<Request: Send, Response> {
-    buffer: Buffer<Request, BoxedResponse<Response>>,
-    worker: Arc<WorkerOwner>,
+impl VersionId {
+    /// Return the generation number, starting at one.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
 }
 
-struct WorkerOwner(tokio::task::JoinHandle<()>);
+struct PublishedVersion<Request: Send, Response> {
+    id: VersionId,
+    runtime_id: u64,
+    dispatch: tracing::Dispatch,
+    graph: GraphVersion<Request, Response>,
+}
 
-impl Drop for WorkerOwner {
+impl<Request: Send, Response> Drop for PublishedVersion<Request, Response> {
     fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-pin_project! {
-    struct RetainedExecution<Request, Response>
-    where
-        Request: Send,
-        Request: 'static,
-        Response: Send,
-        Response: 'static,
-    {
-        #[pin]
-        execution: tower::util::Oneshot<Buffer<Request, BoxedResponse<Response>>, Request>,
-        _worker: Arc<WorkerOwner>,
-    }
-}
-
-impl<Request: Send + 'static, Response: Send + 'static> Future
-    for RetainedExecution<Request, Response>
-{
-    type Output = Result<Response, BoxError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().execution.poll(cx)
-    }
-}
-
-impl<Request, Response> Endpoint<Request, Response>
-where
-    Request: Send + 'static,
-    Response: Send + 'static,
-{
-    /// Wrap a Tower service with a concurrency limit and bounded request queue.
-    ///
-    /// Netplane owns the Tower buffer worker and aborts it after the final
-    /// endpoint and request future release it, including during pending
-    /// service readiness.
-    ///
-    /// # Errors
-    /// Returns an error if either capacity is zero.
-    pub fn new<S>(service: S, capacity: Capacity) -> Result<Self, ConfigError>
-    where
-        S: Service<Request, Response = Response> + Send + 'static,
-        S::Error: Into<BoxError> + Send + Sync,
-        S::Future: Send + 'static,
-    {
-        if capacity.max_in_flight == 0 {
-            return Err(ConfigError::ZeroConcurrency);
-        }
-        if capacity.buffer_capacity == 0 {
-            return Err(ConfigError::ZeroBuffer);
-        }
-        let boxed = BoxService::new(ConcurrencyLimit::new(
-            service.map_err(Into::into),
-            capacity.max_in_flight,
-        ));
-        let (buffer, worker) = Buffer::pair(boxed, capacity.buffer_capacity);
-        Ok(Self {
-            buffer,
-            worker: Arc::new(WorkerOwner(tokio::spawn(worker))),
-        })
-    }
-
-    /// Submit a request to this endpoint.
-    ///
-    /// The returned future waits for queue capacity, then for the result. A
-    /// buffer worker handles readiness and dispatch on its owned service.
-    ///
-    /// # Errors
-    /// Returns a service error or a buffer worker error.
-    pub fn execute(
-        &self,
-        request: Request,
-    ) -> impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>
-    {
-        let worker = Arc::clone(&self.worker);
-        let execution = self.buffer.clone().oneshot(request);
-        RetainedExecution {
-            execution,
-            _worker: worker,
-        }
-    }
-}
-
-impl<Request: Send + 'static, Response: 'static> Clone for Endpoint<Request, Response> {
-    fn clone(&self) -> Self {
-        Self {
-            buffer: self.buffer.clone(),
-            worker: Arc::clone(&self.worker),
-        }
+        let runtime_id = self.runtime_id;
+        let version_id = self.id.get();
+        tracing::dispatcher::with_default(&self.dispatch, || {
+            tracing::debug!(target: "netplane", event = "version.released", runtime_id, version_id);
+        });
     }
 }
 
@@ -222,8 +158,17 @@ impl<S> GraphDraft<S> {
         S::Error: Into<BoxError> + Send + Sync,
         S::Future: Send + 'static,
     {
+        let endpoint = match Endpoint::new(self.service, self.capacity) {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                tracing::warn!(target: "netplane", event = "graph.validation_failed", reason = config_error_kind(&error));
+                return Err(error);
+            }
+        };
+        tracing::debug!(target: "netplane", event = "graph.validated", node_count = 1_u64, route_count = 0_u64);
         Ok(GraphVersion {
-            endpoint: Endpoint::new(self.service, self.capacity)?,
+            endpoint_ids: vec![endpoint.id()],
+            endpoint,
             metadata: GraphMetadata::single_root(self.capacity),
         })
     }
@@ -232,6 +177,7 @@ impl<S> GraphDraft<S> {
 /// One validated, immutable Tower composition and its capacity limits.
 pub struct GraphVersion<Request: Send, Response> {
     endpoint: Endpoint<Request, Response>,
+    endpoint_ids: Vec<u64>,
     metadata: GraphMetadata,
 }
 
@@ -250,8 +196,12 @@ impl<Request: Send, Response> GraphVersion<Request, Response> {
 /// Shutdown closes admission for all handles, waits for accepted futures, and
 /// releases the active graph after draining succeeds.
 pub struct Netplane<Request: Send, Response> {
-    active: Arc<ArcSwapOption<GraphVersion<Request, Response>>>,
+    active: Arc<ArcSwapOption<PublishedVersion<Request, Response>>>,
     admission: Arc<Admission>,
+    runtime_id: u64,
+    generation: u64,
+    next_request_id: Arc<AtomicU64>,
+    next_shutdown_attempt_id: u64,
 }
 
 impl<Request, Response> Netplane<Request, Response>
@@ -270,9 +220,26 @@ where
         if limits.max_outstanding == 0 {
             return Err(ConfigError::ZeroOutstanding);
         }
+        let runtime_id = observability::next_runtime_id();
+        let version_id = VersionId(INITIAL_GENERATION);
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let published = PublishedVersion {
+            id: version_id,
+            runtime_id,
+            dispatch,
+            graph: version,
+        };
+        tracing::info!(target: "netplane", event = "version.published", runtime_id, old_version = NO_PREVIOUS_VERSION, new_version = version_id.get());
+        for &endpoint_id in &published.graph.endpoint_ids {
+            tracing::debug!(target: "netplane", event = "version.endpoint", runtime_id, version_id = version_id.get(), endpoint_id);
+        }
         Ok(Self {
-            active: Arc::new(ArcSwapOption::from(Some(Arc::new(version)))),
+            active: Arc::new(ArcSwapOption::from(Some(Arc::new(published)))),
             admission: Admission::new(limits.max_outstanding),
+            runtime_id,
+            generation: version_id.get(),
+            next_request_id: Arc::new(AtomicU64::new(INITIAL_REQUEST_ID)),
+            next_shutdown_attempt_id: INITIAL_SHUTDOWN_ATTEMPT_ID,
         })
     }
 
@@ -282,7 +249,15 @@ where
         Handle {
             active: Arc::clone(&self.active),
             admission: Arc::clone(&self.admission),
+            runtime_id: self.runtime_id,
+            next_request_id: Arc::clone(&self.next_request_id),
         }
+    }
+
+    /// Return the active publication generation, or `None` after a completed shutdown.
+    #[must_use]
+    pub fn active_version_id(&self) -> Option<VersionId> {
+        self.active.load_full().map(|version| version.id)
     }
 
     /// Atomically publish a fully validated version while running.
@@ -296,9 +271,29 @@ where
         version: GraphVersion<Request, Response>,
     ) -> Result<(), PublishError> {
         if !self.admission.can_publish() {
+            tracing::debug!(target: "netplane", event = "version.publish_rejected", runtime_id = self.runtime_id, reason = "shutting_down");
             return Err(PublishError::ShuttingDown);
         }
-        self.active.store(Some(Arc::new(version)));
+        let Some(next) = self.generation.checked_add(1) else {
+            tracing::warn!(target: "netplane", event = "version.publish_rejected", runtime_id = self.runtime_id, reason = "generation_exhausted");
+            return Err(PublishError::GenerationExhausted);
+        };
+        let old_version = self.generation;
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let next_version = Arc::new(PublishedVersion {
+            id: VersionId(next),
+            runtime_id: self.runtime_id,
+            dispatch,
+            graph: version,
+        });
+        let previous = self.active.swap(Some(Arc::clone(&next_version)));
+        self.generation = next;
+        tracing::info!(target: "netplane", event = "version.published", runtime_id = self.runtime_id, old_version, new_version = next);
+        tracing::debug!(target: "netplane", event = "version.replaced", runtime_id = self.runtime_id, old_version, new_version = next);
+        for &endpoint_id in &next_version.graph.endpoint_ids {
+            tracing::debug!(target: "netplane", event = "version.endpoint", runtime_id = self.runtime_id, version_id = next, endpoint_id);
+        }
+        drop(previous);
         Ok(())
     }
 
@@ -324,6 +319,14 @@ where
         let admission = Arc::clone(&self.admission);
         let active = Arc::clone(&self.active);
         let deadline = tokio::time::Instant::now() + grace_period;
+        let started = tokio::time::Instant::now();
+        let runtime_id = self.runtime_id;
+        let shutdown_attempt_id = self.next_shutdown_attempt_id;
+        self.next_shutdown_attempt_id += 1;
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let grace_period_ms = u64::try_from(grace_period.as_millis()).unwrap_or(u64::MAX);
+        let outstanding = admission.outstanding();
+        tracing::info!(target: "netplane", event = "shutdown.started", runtime_id, shutdown_attempt_id, grace_period_ms, outstanding);
         async move {
             let drain = async {
                 while *counts.borrow_and_update() != 0 {
@@ -334,11 +337,18 @@ where
             };
             let _ = tokio::time::timeout_at(deadline, drain).await;
             let remaining = admission.outstanding();
+            let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             if remaining == 0 {
                 active.store(None);
                 admission.mark_stopped();
+                tracing::dispatcher::with_default(&dispatch, || {
+                    tracing::info!(target: "netplane", event = "shutdown.completed", runtime_id, shutdown_attempt_id, duration_ms);
+                });
                 Ok(())
             } else {
+                tracing::dispatcher::with_default(&dispatch, || {
+                    tracing::warn!(target: "netplane", event = "shutdown.timed_out", runtime_id, shutdown_attempt_id, duration_ms, remaining);
+                });
                 Err(DrainError::TimedOut { remaining })
             }
         }
@@ -347,8 +357,10 @@ where
 
 /// Cloneable request handle that selects a graph version at invocation time.
 pub struct Handle<Request: Send, Response> {
-    active: Arc<ArcSwapOption<GraphVersion<Request, Response>>>,
+    active: Arc<ArcSwapOption<PublishedVersion<Request, Response>>>,
     admission: Arc<Admission>,
+    runtime_id: u64,
+    next_request_id: Arc<AtomicU64>,
 }
 
 impl<Request: Send, Response> Clone for Handle<Request, Response> {
@@ -356,6 +368,8 @@ impl<Request: Send, Response> Clone for Handle<Request, Response> {
         Self {
             active: Arc::clone(&self.active),
             admission: Arc::clone(&self.admission),
+            runtime_id: self.runtime_id,
+            next_request_id: Arc::clone(&self.next_request_id),
         }
     }
 }
@@ -381,15 +395,22 @@ where
         impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>,
         AdmissionError,
     > {
-        let guard = self.admission.try_admit()?;
+        let guard = match self.admission.try_admit() {
+            Ok(guard) => guard,
+            Err(AdmissionError::Closed) => {
+                tracing::debug!(target: "netplane", event = "request.rejected", runtime_id = self.runtime_id, reason = "admission_closed");
+                return Err(AdmissionError::Closed);
+            }
+            Err(AdmissionError::AtCapacity { limit }) => {
+                tracing::warn!(target: "netplane", event = "request.rejected", runtime_id = self.runtime_id, reason = "capacity_exceeded", outstanding_limit = limit);
+                return Err(AdmissionError::AtCapacity { limit });
+            }
+        };
         let version = self.active.load_full().ok_or(AdmissionError::Closed)?;
-        let execution = version.endpoint.execute(request);
-        Ok(async move {
-            let result = execution.await;
-            drop(version);
-            drop(guard);
-            result
-        })
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let observation = RequestObservation::new(self.runtime_id, version.id.get(), request_id);
+        let execution = version.graph.endpoint.execute(request);
+        Ok(observe(execution, observation, (version, guard)))
     }
 
     /// Admit the request now and return a future that executes it.

@@ -17,6 +17,7 @@ publish = false
 workspace = true
 
 [dependencies]
+tracing.workspace = true
 arc-swap.workspace = true
 pin-project-lite.workspace = true
 tower.workspace = true
@@ -24,5 +25,6 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["registry", "fmt", "env-filter"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tower = { workspace = true, features = ["filter"] }

@@ -289,6 +289,21 @@ where
     /// # Errors
     /// Returns [`GraphBuildError`] for invalid declarations or capacities.
     pub fn validate(self) -> Result<GraphVersion<Request, Response>, GraphBuildError> {
+        match self.validate_inner() {
+            Ok(version) => {
+                let node_count = version.metadata.nodes.len();
+                let route_count = version.metadata.routes.len();
+                tracing::debug!(target: "netplane", event = "graph.validated", node_count, route_count);
+                Ok(version)
+            }
+            Err(error) => {
+                tracing::warn!(target: "netplane", event = "graph.validation_failed", reason = error.kind());
+                Err(error)
+            }
+        }
+    }
+
+    fn validate_inner(self) -> Result<GraphVersion<Request, Response>, GraphBuildError> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -368,6 +383,7 @@ where
             .get(&fallback)
             .cloned()
             .ok_or_else(|| GraphBuildError::UnknownTarget(fallback.clone()))?;
+        let mut endpoint_ids: Vec<u64> = endpoints.values().map(Endpoint::id).collect();
         let selector = router.selector;
         let root = service_fn(move |request: Request| {
             let label = selector(&request);
@@ -377,9 +393,28 @@ where
                 .clone();
             async move { endpoint.execute(request).await }
         });
+        let endpoint = Endpoint::new(root, self.capacity)?;
+        endpoint_ids.push(endpoint.id());
         Ok(GraphVersion {
-            endpoint: Endpoint::new(root, self.capacity)?,
+            endpoint,
+            endpoint_ids,
             metadata,
         })
+    }
+}
+
+impl GraphBuildError {
+    const fn kind(&self) -> &'static str {
+        match self {
+            Self::MissingEntry => "missing_entry",
+            Self::DuplicateNode(_) => "duplicate_node",
+            Self::UnknownEntry(_) => "unknown_entry",
+            Self::UnknownTarget(_) => "unknown_target",
+            Self::DuplicateRoute(_) => "duplicate_route",
+            Self::DuplicateFallback(_) => "duplicate_fallback",
+            Self::MissingFallback => "missing_fallback",
+            Self::UnsupportedTopology(_) => "unsupported_topology",
+            Self::Capacity(error) => crate::config_error_kind(error),
+        }
     }
 }

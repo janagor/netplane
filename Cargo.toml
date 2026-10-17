@@ -84,6 +84,7 @@ cognitive_complexity = "allow"
 
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
+tracing = "0.1"
 arc-swap = "1"
 pin-project-lite = "0.2"
 thiserror = "2"

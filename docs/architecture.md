@@ -31,7 +31,7 @@ The in-memory runtime accepts a Tower service root, bounds its concurrency and b
 
 ## Current limits and future work
 
-A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. `GraphDraft` validates capacities only. `GraphBuilder` validates its declared single-router topology and capacities, but cannot prove application policy or selector behavior. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation. Observability, a reconfiguration control API, and HTTP integration are future work.
+A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. `GraphDraft` validates capacities only. `GraphBuilder` validates its declared single-router topology and capacities, but cannot prove application policy or selector behavior. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation. Structured tracing events are documented in [Runtime observability](observability.md). A reconfiguration control API and HTTP integration are future work.
 
 ## Decisions
 

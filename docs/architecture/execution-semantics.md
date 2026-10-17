@@ -20,4 +20,6 @@ Calling `Netplane::shutdown(grace_period)` closes admission synchronously across
 
 ## Outside the current runtime
 
-Arbitrary graph construction, policy validation, observability, a reconfiguration control API, and HTTP integration remain future work.
+The runtime emits [structured tracing events](../observability.md) for admission, completion, cancellation, validation, publication, worker termination, and shutdown. Accepted-to-terminal duration includes any time before the first poll. A replaced version is released only after its last owner drops.
+
+Arbitrary graph construction, policy validation, a reconfiguration control API, and HTTP integration remain future work.
