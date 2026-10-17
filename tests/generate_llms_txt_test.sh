@@ -15,6 +15,7 @@ SOURCES=(
     docs/adr/0001-tower-service-model.md
     docs/adr/0002-runtime-reconfiguration.md
     docs/adr/0003-crate-boundaries.md
+    docs/adr/0004-graph-composition.md
     QUICKSTART.md
     SECURITY.md
 )

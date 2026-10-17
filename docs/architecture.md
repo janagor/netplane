@@ -27,11 +27,11 @@ Create another crate only when a concrete dependency or API boundary justifies i
 
 ## Implemented runtime
 
-The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets. An internal [composition prototype](adr/0004-graph-composition.md) uses sequential Tower middleware and request-aware routing to two independently owned, bounded backend endpoints. It does not add a public graph construction API.
+The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets. `GraphBuilder` exposes the [composition prototype](adr/0004-graph-composition.md) as a validated single-router composition over named, independently bounded backend endpoints. Ordinary Tower layers provide middleware.
 
 ## Current limits and future work
 
-A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. Validation checks positive capacities, not graph topology or application policy. There is no general-purpose graph construction API. Observability, a reconfiguration control API, HTTP integration, and broader graph composition are planned work; none are current guarantees. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation.
+A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. `GraphDraft` validates capacities only. `GraphBuilder` validates its declared single-router topology and capacities, but cannot prove application policy or selector behavior. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation. Observability, a reconfiguration control API, and HTTP integration are future work.
 
 ## Decisions
 

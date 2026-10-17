@@ -195,11 +195,11 @@ Create another crate only when a concrete dependency or API boundary justifies i
 
 ## Implemented runtime
 
-The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets. An internal [composition prototype](adr/0004-graph-composition.md) uses sequential Tower middleware and request-aware routing to two independently owned, bounded backend endpoints. It does not add a public graph construction API.
+The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets. `GraphBuilder` exposes the [composition prototype](adr/0004-graph-composition.md) as a validated single-router composition over named, independently bounded backend endpoints. Ordinary Tower layers provide middleware.
 
 ## Current limits and future work
 
-A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. Validation checks positive capacities, not graph topology or application policy. There is no general-purpose graph construction API. Observability, a reconfiguration control API, HTTP integration, and broader graph composition are planned work; none are current guarantees. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation.
+A positive runtime admission limit bounds accepted, unfinished requests across all versions and handles; excess requests are rejected immediately. `GraphDraft` validates capacities only. `GraphBuilder` validates its declared single-router topology and capacities, but cannot prove application policy or selector behavior. Arbitrary directed graphs, cycles, shared nodes, and dynamic node editing require a concrete use case before implementation. Observability, a reconfiguration control API, and HTTP integration are future work.
 
 ## Decisions
 
@@ -216,17 +216,17 @@ Inherited tooling ADRs in `docs/adr/tooling/` are not Netplane runtime design de
 
 # Execution semantics
 
-This is the canonical contract for the implemented runtime. `crates/netplane` executes a Tower service root, not an arbitrary graph schema.
+This is the canonical contract for the implemented runtime. `crates/netplane` executes a Tower service root; `GraphBuilder` compiles one supported router topology into that root.
 
 ## Validation and publication
 
-`GraphDraft` accepts a Tower service root, including one built with `ServiceBuilder` and layers. Validation checks positive concurrency and buffer capacities and starts a Tower buffer worker. It does not parse a graph schema, validate topology, inspect routes, or prove that an application policy is correct. The [live reconfiguration example](../../crates/netplane/examples/live_reconfiguration.rs) implements a simulated authorization filter and routing policy as ordinary Tower services, with an independently owned, bounded endpoint for each backend.
+`GraphDraft` accepts a Tower service root, including one built with `ServiceBuilder` and layers. Its validation checks positive concurrency and buffer capacities and starts a Tower buffer worker. `GraphBuilder` accepts named Tower services, one request selector, declared route labels, an explicit fallback, and a router entry. Validation checks references, duplicate declarations, reachable backends, supported topology, and positive outer and backend capacities before starting any workers. Selector labels without a declared route use the fallback. Route and fallback declarations require a previously registered router; services and the entry can be declared in any order. The builder cannot prove application policy or interpret selector logic. The [live reconfiguration example](../../crates/netplane/examples/live_reconfiguration.rs) applies simulated authorization through ordinary Tower layers on each backend. That filter runs after route selection and backend readiness.
 
 `Handle::execute()` admits a request and selects an immutable version synchronously when called, before its returned future is polled. `Netplane::publish()` atomically replaces a complete version using `ArcSwapOption`. An accepted request keeps its selected version through completion or future drop, so an old request can finish after a new composition is published. The Tower buffer worker polls readiness and calls the same owned service instance. Requests selected after publication use the new version.
 
 ## Capacity and cancellation
 
-Each version has its own concurrency limit and bounded Tower buffer. Capacity is not shared across retained versions; a transition can therefore have work executing in both versions. The buffer bounds queued requests, while callers waiting for queue capacity remain pending. `RuntimeLimits::max_outstanding` bounds all accepted, unfinished request futures across versions and cloned handles, including unpolled futures and queue waiters. Admission happens synchronously at `Handle::execute()` or `try_execute()` invocation. At the limit, `try_execute()` returns `AdmissionError::AtCapacity` immediately; `execute()` returns a future containing that boxed error. Completion or future drop releases one slot. Publication does not reset the budget, and old-version requests keep their slots until completion or drop. Shutdown closure takes precedence over overload. This limit does not bound tasks spawned by services or request memory. The example routes requests between two independently bounded backend endpoints. Backend A initially withholds readiness while backend B remains ready, demonstrating independent backend progress when outer execution capacity is available. Its filter checks a caller-provided Boolean before routing. Each selected backend endpoint polls readiness before dispatch. The router can report readiness while a selected backend is saturated, so backpressure appears while its execution future waits; outer execution slots can also cause head-of-line blocking. This is only a simulated authorization decision, not identity authentication.
+Each version has its own concurrency limit and bounded Tower buffer. Capacity is not shared across retained versions; a transition can therefore have work executing in both versions. The buffer bounds queued requests, while callers waiting for queue capacity remain pending. `RuntimeLimits::max_outstanding` bounds all accepted, unfinished request futures across versions and cloned handles, including unpolled futures and queue waiters. Admission happens synchronously at `Handle::execute()` or `try_execute()` invocation. At the limit, `try_execute()` returns `AdmissionError::AtCapacity` immediately; `execute()` returns a future containing that boxed error. Completion or future drop releases one slot. Publication does not reset the budget, and old-version requests keep their slots until completion or drop. Shutdown closure takes precedence over overload. This limit does not bound tasks spawned by services or request memory. The example routes requests between two independently bounded backend endpoints. Backend A initially withholds readiness while backend B remains ready, demonstrating independent backend progress when outer execution capacity is available. Its backend filters check a caller-provided Boolean after routing. Each selected backend endpoint polls readiness before dispatch. The router can report readiness while a selected backend is saturated, so backpressure appears while its execution future waits; outer execution slots can also cause head-of-line blocking. Independent backend readiness does not guarantee progress for a ready branch if other requests occupy every outer slot. This is only a simulated authorization decision, not identity authentication.
 
 Dropping a queued request cancels its wait. Dropping a dispatched request future releases its global admission slot, but cancellation of the underlying call depends on the service. Thus `max_outstanding` bounds accepted Netplane request futures, not all service executions that may continue after cancellation. Netplane owns each Tower buffer worker and aborts it when the last owning endpoint and request future reference disappears, including when the worker is stuck in readiness.
 
@@ -236,7 +236,7 @@ Calling `Netplane::shutdown(grace_period)` closes admission synchronously across
 
 ## Outside the current runtime
 
-General graph construction, topology and policy validation, observability, a reconfiguration control API, and HTTP integration remain future work.
+Arbitrary graph construction, policy validation, observability, a reconfiguration control API, and HTTP integration remain future work.
 
 ## Source: docs/adr/0001-tower-service-model.md
 
@@ -328,7 +328,11 @@ Use typed, acyclic Tower composition for sequential middleware and one selected 
 
 The selected endpoint's worker polls readiness and calls its own service instance. Each backend has explicit concurrency and buffer capacities. The complete root is validated through `GraphDraft` and published as one immutable version. Accepted requests retain their selected version; endpoint execution futures retain worker ownership. An unmatched route must be rejected explicitly unless a fallback was deliberately configured. The two-branch prototype has an exhaustive parity route.
 
-This model does not define a graph schema or a public `GraphBuilder`, `Graph`, `Node`, or `Router`. Cycles, fan-out and joins, mutable nodes, shared service instances, and serialized declarations are outside this decision.
+At the prototype stage, this model did not define a graph schema or public graph construction API. Cycles, fan-out and joins, mutable nodes, shared service instances, and serialized declarations remained outside the decision.
+
+## PR 10 extension
+
+`GraphBuilder` makes the prototype's single-router topology public. It validates named service targets, route labels, the explicit fallback, entry, reachability, and capacities before creating endpoint workers. Middleware remains ordinary Tower composition on registered services. Each compiled version carries deterministic metadata describing declarations and capacities. The builder does not support nested routers, cycles, fan-out, joins, or policy verification. `GraphDraft` remains the direct single-root API.
 
 ## Readiness alternatives
 
@@ -344,7 +348,7 @@ Netplane guarantees its accepted-request budget is released when an execution fu
 
 ## Findings and follow-up
 
-The prototype tests demonstrate that `call` follows successful backend readiness, B completes before A becomes ready when an outer slot is available, and a non-`Clone` stateful service works through its endpoint. Publication lets old work complete on old backend instances, and obsolete workers release after their last owners disappear. Backend errors propagate without rerouting. The configured Tower buffer supplies the queue bound; the prototype's dispatch test asserts the concurrency limit rather than measuring queue occupancy. Independent backend readiness does not guarantee independent progress when all outer slots are occupied. These findings support a later `GraphBuilder` design, but topology validation and policy validation remain open for PR 10.
+The prototype tests demonstrate that `call` follows successful backend readiness, B completes before A becomes ready when an outer slot is available, and a non-`Clone` stateful service works through its endpoint. Publication lets old work complete on old backend instances, and obsolete workers release after their last owners disappear. Backend errors propagate without rerouting. The configured Tower buffer supplies the queue bound; the prototype's dispatch test asserts the concurrency limit rather than measuring queue occupancy. Independent backend readiness does not guarantee independent progress when all outer slots are occupied. These findings informed the public `GraphBuilder` extension above. Application policy validation remains outside its scope.
 
 ## Source: QUICKSTART.md
 

@@ -14,7 +14,11 @@ Use typed, acyclic Tower composition for sequential middleware and one selected 
 
 The selected endpoint's worker polls readiness and calls its own service instance. Each backend has explicit concurrency and buffer capacities. The complete root is validated through `GraphDraft` and published as one immutable version. Accepted requests retain their selected version; endpoint execution futures retain worker ownership. An unmatched route must be rejected explicitly unless a fallback was deliberately configured. The two-branch prototype has an exhaustive parity route.
 
-This model does not define a graph schema or a public `GraphBuilder`, `Graph`, `Node`, or `Router`. Cycles, fan-out and joins, mutable nodes, shared service instances, and serialized declarations are outside this decision.
+At the prototype stage, this model did not define a graph schema or public graph construction API. Cycles, fan-out and joins, mutable nodes, shared service instances, and serialized declarations remained outside the decision.
+
+## PR 10 extension
+
+`GraphBuilder` makes the prototype's single-router topology public. It validates named service targets, route labels, the explicit fallback, entry, reachability, and capacities before creating endpoint workers. Middleware remains ordinary Tower composition on registered services. Each compiled version carries deterministic metadata describing declarations and capacities. The builder does not support nested routers, cycles, fan-out, joins, or policy verification. `GraphDraft` remains the direct single-root API.
 
 ## Readiness alternatives
 
@@ -30,4 +34,4 @@ Netplane guarantees its accepted-request budget is released when an execution fu
 
 ## Findings and follow-up
 
-The prototype tests demonstrate that `call` follows successful backend readiness, B completes before A becomes ready when an outer slot is available, and a non-`Clone` stateful service works through its endpoint. Publication lets old work complete on old backend instances, and obsolete workers release after their last owners disappear. Backend errors propagate without rerouting. The configured Tower buffer supplies the queue bound; the prototype's dispatch test asserts the concurrency limit rather than measuring queue occupancy. Independent backend readiness does not guarantee independent progress when all outer slots are occupied. These findings support a later `GraphBuilder` design, but topology validation and policy validation remain open for PR 10.
+The prototype tests demonstrate that `call` follows successful backend readiness, B completes before A becomes ready when an outer slot is available, and a non-`Clone` stateful service works through its endpoint. Publication lets old work complete on old backend instances, and obsolete workers release after their last owners disappear. Backend errors propagate without rerouting. The configured Tower buffer supplies the queue bound; the prototype's dispatch test asserts the concurrency limit rather than measuring queue occupancy. Independent backend readiness does not guarantee independent progress when all outer slots are occupied. These findings informed the public `GraphBuilder` extension above. Application policy validation remains outside its scope.

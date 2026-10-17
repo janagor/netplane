@@ -12,7 +12,7 @@ use std::{
 use tokio::sync::oneshot;
 use tower::{BoxError, Service, ServiceBuilder, filter::FilterLayer, service_fn};
 
-use netplane::{Capacity, Endpoint, GraphDraft, GraphVersion, Netplane, RuntimeLimits};
+use netplane::{Capacity, GraphBuilder, GraphDraft, GraphVersion, Netplane, RuntimeLimits};
 
 #[derive(Clone, Copy)]
 /// Request data used by both published compositions.
@@ -43,10 +43,6 @@ const BACKEND_CAPACITY: Capacity = Capacity {
     max_in_flight: 1,
     buffer_capacity: 1,
 };
-
-const fn routes_to_a(request: Request) -> bool {
-    request.key.is_multiple_of(2)
-}
 
 struct ReadinessGate {
     state: Arc<Mutex<GateState>>,
@@ -116,37 +112,48 @@ fn routed_graph() -> Result<
         waker: None,
     }));
     let (polled_tx, polled_rx) = oneshot::channel();
-    let backend_a = Endpoint::new(
-        ReadinessGate {
-            state: state.clone(),
-            polled: Some(polled_tx),
-        },
-        BACKEND_CAPACITY,
-    )?;
-    let backend_b = Endpoint::new(
+    let backend_a = ReadinessGate {
+        state: state.clone(),
+        polled: Some(polled_tx),
+    };
+    let backend_b =
         service_fn(
             |request: Request| async move { Ok::<_, Infallible>(format!("B:{}", request.key)) },
-        ),
-        BACKEND_CAPACITY,
-    )?;
-    let router = service_fn(move |request: Request| {
-        let selected = if routes_to_a(request) {
-            backend_a.clone()
-        } else {
-            backend_b.clone()
-        };
-        async move { selected.execute(request).await }
-    });
-    let authorized_router = ServiceBuilder::new()
-        .layer(FilterLayer::new(|request: Request| {
+        );
+    let authorization = || {
+        FilterLayer::new(|request: Request| {
             request
                 .authorized
                 .then_some(request)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "unauthorized"))
-        }))
-        .service(router);
-    let graph = GraphDraft::new(authorized_router)
+        })
+    };
+    let graph = GraphBuilder::<Request, String>::new()
+        .service(
+            "backend-a",
+            ServiceBuilder::new()
+                .layer(authorization())
+                .service(backend_a),
+        )
+        .service(
+            "backend-b",
+            ServiceBuilder::new()
+                .layer(authorization())
+                .service(backend_b),
+        )
+        .router("dispatch", |request: &Request| {
+            if request.key.is_multiple_of(2) {
+                "even"
+            } else {
+                "odd"
+            }
+        })
+        .route("dispatch", "even", "backend-a")
+        .route("dispatch", "odd", "backend-b")
+        .fallback("dispatch", "backend-a")
+        .entry("dispatch")
         .capacity(CAPACITY)
+        .backend_capacity(BACKEND_CAPACITY)
         .validate()?;
     Ok((graph, state, polled_rx))
 }
@@ -207,9 +214,21 @@ pub async fn run_demo() -> Result<Results, Box<dyn Error + Send + Sync>> {
         .await?;
     ReadinessGate::open(&state);
     let routed_a = routed_a.await??;
-    let rejected = match handle
+    let rejected_a = match handle
         .execute(Request {
             key: 4,
+            authorized: false,
+        })
+        .await
+    {
+        Err(error) => error
+            .downcast_ref::<io::Error>()
+            .is_some_and(|error| error.kind() == io::ErrorKind::PermissionDenied),
+        Ok(_) => false,
+    };
+    let rejected_b = match handle
+        .execute(Request {
+            key: 5,
             authorized: false,
         })
         .await
@@ -229,7 +248,7 @@ pub async fn run_demo() -> Result<Results, Box<dyn Error + Send + Sync>> {
         old_request,
         routed_a,
         routed_b,
-        rejected,
+        rejected: rejected_a && rejected_b,
     })
 }
 

@@ -55,6 +55,47 @@ Construct endpoints and validate drafts inside a Tokio runtime. Each version
 has its own execution and buffer capacity limits. The explicit global limit bounds accepted, unfinished requests across every handle and retained version, including unpolled futures. At the limit, `try_execute()` returns `AdmissionError::AtCapacity` immediately. Dropping an execution future cancels its queue
 wait; cancellation of work already dispatched depends on the service.
 
+For request-dependent routing, `GraphBuilder` compiles one named router and its
+Tower services into the same `GraphVersion` type:
+
+```rust,no_run
+use netplane::{GraphBuilder, Netplane, RuntimeLimits};
+use tower::service_fn;
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let graph = GraphBuilder::<u32, String>::new()
+    .service("even", service_fn(|value: u32| async move {
+        Ok::<_, std::convert::Infallible>(format!("even:{value}"))
+    }))
+    .service("odd", service_fn(|value: u32| async move {
+        Ok::<_, std::convert::Infallible>(format!("odd:{value}"))
+    }))
+    .router("dispatch", |value: &u32| if value.is_multiple_of(2) { "even" } else { "odd" })
+    .route("dispatch", "even", "even")
+    .route("dispatch", "odd", "odd")
+    .fallback("dispatch", "odd")
+    .entry("dispatch")
+    .validate()?;
+assert_eq!(graph.metadata().entry, "dispatch");
+let runtime = Netplane::new(graph, RuntimeLimits { max_outstanding: 128 })?;
+assert_eq!(runtime.handle().execute(2).await?, "even:2");
+# Ok(())
+# }
+```
+
+Register middleware-composed services with `ServiceBuilder`. Call `router()`
+before `route()` and `fallback()`; services and `entry()` may be declared in any
+order. Validation rejects
+unknown targets, duplicate names, route labels, and fallbacks, unreachable services, missing
+fallbacks, unsupported topology, and invalid capacities before workers start.
+Each backend has an independent bounded endpoint; use `backend_capacity()` to
+set its limit. A request waiting on one backend can occupy an outer execution
+slot, so configure `capacity()` with enough slots for the desired cross-backend
+progress. Independent backend readiness does not guarantee progress for a
+healthy branch when requests to another branch fill every outer execution slot.
+Middleware registered on a backend runs after routing and after that backend
+becomes ready; apply it to each backend when every route needs the same policy.
+
 Call `runtime.shutdown(grace_period)` to close admission immediately and wait for
 accepted request futures to finish or be dropped. A timeout reports the number
 still outstanding; admission stays closed, and the drain can be retried. A

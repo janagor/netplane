@@ -2,6 +2,7 @@
 //!
 //! [`Endpoint`] executes one bounded Tower service. [`Netplane`] publishes
 //! validated, immutable versions for cloneable execution handles.
+//! [`GraphBuilder`] validates a single request router over named Tower services.
 
 #![forbid(unsafe_code)]
 
@@ -14,7 +15,11 @@ use std::{
 };
 
 use arc_swap::ArcSwapOption;
+mod graph;
 mod lifecycle;
+pub use graph::{
+    GraphBuildError, GraphBuilder, GraphMetadata, NodeKind, NodeMetadata, RouteMetadata,
+};
 use lifecycle::Admission;
 pub use lifecycle::{AdmissionError, DrainError};
 use pin_project_lite::pin_project;
@@ -24,7 +29,7 @@ use tower::{
 };
 
 /// Capacity settings for one endpoint.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capacity {
     /// Maximum requests executing in the underlying service at once.
     pub max_in_flight: usize,
@@ -219,6 +224,7 @@ impl<S> GraphDraft<S> {
     {
         Ok(GraphVersion {
             endpoint: Endpoint::new(self.service, self.capacity)?,
+            metadata: GraphMetadata::single_root(self.capacity),
         })
     }
 }
@@ -226,6 +232,15 @@ impl<S> GraphDraft<S> {
 /// One validated, immutable Tower composition and its capacity limits.
 pub struct GraphVersion<Request: Send, Response> {
     endpoint: Endpoint<Request, Response>,
+    metadata: GraphMetadata,
+}
+
+impl<Request: Send, Response> GraphVersion<Request, Response> {
+    /// Inspect the immutable declaration used to build this version.
+    #[must_use]
+    pub const fn metadata(&self) -> &GraphMetadata {
+        &self.metadata
+    }
 }
 
 /// Single publisher for a sequence of immutable graph versions.
