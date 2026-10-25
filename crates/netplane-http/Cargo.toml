@@ -9,6 +9,11 @@ repository.workspace = true
 description = "Bounded HTTP adapter for Netplane"
 publish = false
 
+[[example]]
+name = "policy_gateway"
+path = "examples/policy_gateway/main.rs"
+test = true
+
 [lints]
 workspace = true
 

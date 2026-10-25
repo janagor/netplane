@@ -2,6 +2,8 @@
 
 The optional `netplane-http` workspace crate serves buffered HTTP requests through a Netplane handle. It bounds body size, body read concurrency, and read time, then rejects oversized encoded responses. See `crates/netplane-http/examples/reconfigure.rs` for a persistent listener with process-local graph publication.
 
+The [policy routing gateway](crates/netplane-http/examples/policy_gateway/README.md) is a persistent HTTP example with deterministic stable/canary routing, bounded execution, and graceful shutdown.
+
 Netplane is an early stage Rust library for constructing and managing dynamically reconfigurable Tower service graphs. It aims to make graph publication, request lifetime, readiness, backpressure, and cancellation behavior explicit.
 
 The repository provides bounded Tower service endpoints, a validated single-router `GraphBuilder`, conditional publication and rollback through `ReconfigurationController`, atomic publication of validated execution versions, graceful shutdown, and development tooling. Accepted requests retain the version selected at invocation. Successful shutdown releases the active graph, even when handles remain. Version `0.0.0` marks this pre-release stage; neither library crate is published.
