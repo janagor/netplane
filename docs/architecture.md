@@ -7,7 +7,7 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 ## Design constraints
 
 1. **Tower interoperability.** Compose with `tower::Service` and preserve its readiness contract. Introduce a Netplane-specific abstraction only when a working prototype shows why it is needed.
-2. **Graph composition.** Model services and policies as validated executable compositions. Decide the graph representation through a small in-memory prototype.
+2. **Graph composition.** Use the implemented single-router `GraphBuilder` for named backend composition and ordinary Tower layers for middleware. Broader graph representations require a concrete use case.
 3. **Immutable publication.** Build and validate a replacement configuration before publishing it. Active graph versions must not be modified in place.
 4. **Request lifetime.** An in-flight request must retain the graph version and resources it needs until completion or cancellation. Readiness and dispatch for an individual request must operate on a consistent service instance and graph version. Graph replacement must not invalidate an outstanding readiness decision or prematurely release resources required by pending requests.
 5. **Backpressure.** Bound concurrency and queues. Do not bypass readiness or spawn unbounded tasks to hide load.

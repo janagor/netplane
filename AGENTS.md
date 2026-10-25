@@ -7,6 +7,7 @@ Netplane is a reusable Rust library with bounded Tower execution, immutable grap
 | Path | Responsibility |
 | --- | --- |
 | `crates/netplane` | Public, transport-independent runtime library. |
+| `crates/netplane-http` | Optional bounded HTTP adapter and Axum listener integration; depends on the core. |
 | `crates/xtask` | Development automation; never a runtime dependency of the library. |
 | `docs/architecture.md`, `docs/adr/` | Design requirements and accepted decisions. |
 
@@ -19,7 +20,8 @@ Add crates only when a concrete dependency boundary emerges. Keep transport and 
 - Preserve queued-request cancellation, worker cleanup, immediate shutdown admission closure, and retryable draining after a timeout. Dispatched cancellation depends on the service.
 - Keep `crates/netplane` independent of transports and deployment systems.
 - Preserve per-version concurrency and buffer bounds. A positive global admission budget bounds accepted, unfinished requests across versions and handles, including unpolled futures.
-- `GraphDraft` validates positive capacities; it does not validate topology or application policy. A general graph construction API is not implemented.
+- `GraphDraft` validates positive capacities for a Tower service root. `GraphBuilder` validates its supported single-router topology, named backends, routes, fallback, and capacities. Neither validates application policy. Arbitrary DAGs, nested graphs, and dynamic node editing are unsupported.
+- `ReconfigurationController` provides conditional publication, bounded rollback history, and inspection. Rollback republishes retained executable state under a new version ID.
 
 ## Design rules
 
@@ -31,7 +33,7 @@ Add crates only when a concrete dependency boundary emerges. Keep transport and 
 - Keep locks out of `.await` spans. Use `tokio` only when runtime work needs it; offload blocking or long CPU work appropriately.
 - Make cancellation, timeout, and shutdown cleanup observable and testable.
 - Test core behavior with mock services, without sockets. Cover version lifetime, readiness, backpressure, concurrency, cancellation, and shutdown when changing those behaviors.
-- Keep future HTTP and deployment adapters outside the core runtime.
+- Keep the implemented HTTP adapter and future deployment adapters outside the core runtime.
 
 ## Rust and API conventions
 
