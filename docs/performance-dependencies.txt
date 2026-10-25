@@ -1,0 +1,83 @@
+anes v0.1.6
+anstyle v1.0.14
+arc-swap v1.9.2
+autocfg v1.5.1
+bytes v1.12.1
+cast v0.3.0
+cfg-if v1.0.5
+ciborium v0.2.2
+ciborium-io v0.2.2
+ciborium-ll v0.2.2
+clap v4.6.7
+clap_builder v4.6.7
+clap_lex v1.1.1
+criterion v0.5.1
+criterion-plot v0.5.0
+crossbeam-deque v0.8.8
+crossbeam-epoch v0.9.21
+crossbeam-utils v0.8.23
+either v1.19.0
+futures v0.3.34
+futures-channel v0.3.34
+futures-core v0.3.34
+futures-io v0.3.34
+futures-sink v0.3.34
+futures-task v0.3.34
+futures-util v0.3.34
+half v2.7.1
+is-terminal v0.4.17
+itertools v0.10.5
+itoa v1.0.18
+lazy_static v1.5.1
+libc v0.2.190
+log v0.4.34
+matchers v0.2.0
+memchr v2.8.3
+netplane v0.0.0 (local workspace)
+nu-ansi-term v0.50.3
+num-traits v0.2.19
+once_cell v1.21.4
+oorandom v11.1.5
+pin-project-lite v0.2.17
+plotters v0.3.7
+plotters-backend v0.3.7
+plotters-svg v0.3.7
+proc-macro2 v1.0.107
+quote v1.0.47
+rayon v1.12.0
+rayon-core v1.13.0
+regex v1.13.1
+regex-automata v0.4.18
+regex-syntax v0.8.11
+rustversion v1.0.23 (proc-macro)
+same-file v1.0.6
+serde v1.0.229
+serde_core v1.0.229
+serde_derive v1.0.229 (proc-macro)
+serde_json v1.0.154
+sharded-slab v0.1.7
+slab v0.4.12
+smallvec v1.16.3
+syn v2.0.119
+syn v3.0.9
+sync_wrapper v1.0.2
+thiserror v2.0.21
+thiserror-impl v2.0.21 (proc-macro)
+thread_local v1.1.10
+tinytemplate v1.2.1
+tokio v1.53.3
+tokio-macros v2.7.2 (proc-macro)
+tokio-util v0.7.20
+tower v0.5.3
+tower-layer v0.3.3
+tower-service v0.3.3
+tracing v0.1.44
+tracing-attributes v0.1.31 (proc-macro)
+tracing-core v0.1.36
+tracing-log v0.2.0
+tracing-subscriber v0.3.23
+unicode-ident v1.0.27
+walkdir v2.5.0
+zerocopy v0.8.63
+zerocopy-derive v0.8.63 (proc-macro)
+zmij v1.0.23

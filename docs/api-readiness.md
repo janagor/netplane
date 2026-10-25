@@ -1,6 +1,6 @@
 # Public API review
 
-This review covers the current `0.0.0` source surface. PR 15 keeps public signatures intact; no migration is required for existing source consumers. The external-consumer test in `crates/netplane/tests/public_api.rs` compiles and runs the main routing, publication, rollback, admission and drain paths. The optional HTTP adapter has a separate smoke test in `crates/netplane-http/tests/public_api.rs` that stays outside the core dependency graph.
+This review covers the current `0.0.0` source surface. This documentation change keeps public signatures intact; no migration is required for existing source consumers. The external-consumer tests in `crates/netplane/tests/public_api.rs` and `crates/netplane-http/tests/public_api.rs` exercise the supported entry points from outside each library crate.
 
 | Area | Review outcome |
 | --- | --- |
@@ -13,3 +13,14 @@ This review covers the current `0.0.0` source surface. PR 15 keeps public signat
 | HTTP adapter | `HttpLimits` validates body and response limits. `HttpAdapter` maps transport failures to HTTP responses and remains in a separate optional workspace crate. |
 
 The current typed error boundary is deliberate: configuration, admission, publication, controller and drain failures have dedicated types; Tower service and buffer errors remain boxed for interoperability. The execution contract documents cancellation after dispatch and deadline expiration. The source remains pre-release, so a release decision still needs to declare its compatibility policy and decide whether the optional HTTP crate will be published.
+
+## Contract evidence and gaps
+
+| Contract | Current evidence | Limit of this review |
+| --- | --- | --- |
+| Admission | `netplane/tests/public_api.rs` holds one unpolled request and observes synchronous `AtCapacity`; `netplane-http/tests/public_api.rs` observes HTTP 503 at capacity. | The full workspace suite covers additional concurrent and cross-version cases. |
+| Publication and rollback | The core external-consumer test publishes a `GraphBuilder` version, completes the old selected request, then rolls back and observes the original result. | Stale and foreign token rejection, history eviction, and metadata behavior rely on controller integration tests. |
+| Shutdown | The core external-consumer test drains and observes closed admission afterward. | Timeout retry and outstanding-future ownership rely on lifecycle and admission tests. |
+| HTTP | The adapter external-consumer test checks successful body echo, overload mapping, and router construction. | Body limits, timeout, response limits, and listener behavior rely on HTTP integration tests. |
+
+These tests compile as external consumers inside the workspace and use workspace-resolved dependencies. A fresh standalone binary also passed `cargo check --offline` against the verified `target/package/netplane-0.0.0` package and imported `Capacity` and `RuntimeLimits`. This smoke build does not exercise the full public API or the HTTP package. The public API must be frozen and a broader consumer build repeated before a `0.1.0` decision.

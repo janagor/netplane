@@ -54,7 +54,7 @@ The optional `netplane-http` workspace crate serves buffered HTTP requests throu
 
 Netplane is an early stage Rust library for constructing and managing dynamically reconfigurable Tower service graphs. It aims to make graph publication, request lifetime, readiness, backpressure, and cancellation behavior explicit.
 
-The repository provides bounded Tower service endpoints, atomic publication of validated execution versions, graceful shutdown, and development tooling. Accepted requests retain the version selected at invocation. Successful shutdown releases the active graph, even when handles remain. Version `0.0.0` marks this pre-release stage; the crate is not published.
+The repository provides bounded Tower service endpoints, a validated single-router `GraphBuilder`, conditional publication and rollback through `ReconfigurationController`, atomic publication of validated execution versions, graceful shutdown, and development tooling. Accepted requests retain the version selected at invocation. Successful shutdown releases the active graph, even when handles remain. Version `0.0.0` marks this pre-release stage; neither library crate is published.
 
 ## Scope
 
@@ -94,6 +94,7 @@ Netplane is a reusable Rust library with bounded Tower execution, immutable grap
 | Path | Responsibility |
 | --- | --- |
 | `crates/netplane` | Public, transport-independent runtime library. |
+| `crates/netplane-http` | Optional bounded HTTP adapter and Axum listener integration; depends on the core. |
 | `crates/xtask` | Development automation; never a runtime dependency of the library. |
 | `docs/architecture.md`, `docs/adr/` | Design requirements and accepted decisions. |
 
@@ -106,7 +107,8 @@ Add crates only when a concrete dependency boundary emerges. Keep transport and 
 - Preserve queued-request cancellation, worker cleanup, immediate shutdown admission closure, and retryable draining after a timeout. Dispatched cancellation depends on the service.
 - Keep `crates/netplane` independent of transports and deployment systems.
 - Preserve per-version concurrency and buffer bounds. A positive global admission budget bounds accepted, unfinished requests across versions and handles, including unpolled futures.
-- `GraphDraft` validates positive capacities; it does not validate topology or application policy. A general graph construction API is not implemented.
+- `GraphDraft` validates positive capacities for a Tower service root. `GraphBuilder` validates its supported single-router topology, named backends, routes, fallback, and capacities. Neither validates application policy. Arbitrary DAGs, nested graphs, and dynamic node editing are unsupported.
+- `ReconfigurationController` provides conditional publication, bounded rollback history, and inspection. Rollback republishes retained executable state under a new version ID.
 
 ## Design rules
 
@@ -118,7 +120,7 @@ Add crates only when a concrete dependency boundary emerges. Keep transport and 
 - Keep locks out of `.await` spans. Use `tokio` only when runtime work needs it; offload blocking or long CPU work appropriately.
 - Make cancellation, timeout, and shutdown cleanup observable and testable.
 - Test core behavior with mock services, without sockets. Cover version lifetime, readiness, backpressure, concurrency, cancellation, and shutdown when changing those behaviors.
-- Keep future HTTP and deployment adapters outside the core runtime.
+- Keep the implemented HTTP adapter and future deployment adapters outside the core runtime.
 
 ## Rust and API conventions
 
@@ -146,11 +148,11 @@ Use `rg` for repository searches and exclude `.git` and `target`. Repository ski
 
 # Contributing to Netplane
 
-Netplane is an early stage Rust library with bounded Tower execution, atomic version publication, cancellation, and graceful shutdown. A general graph construction API is not established. Before proposing one, read [the architecture](docs/architecture.md), [execution semantics](docs/architecture/execution-semantics.md), and [ADRs](docs/adr/), and explain how the change preserves Tower readiness, bounded resources, request lifetime, and transport independence.
+Netplane is an early stage Rust library with bounded Tower execution, atomic version publication, cancellation, and graceful shutdown. `GraphBuilder` supports one router over named, independently bounded backends; arbitrary DAGs, nested graphs, and dynamic node editing are unsupported. Before proposing a broader topology, read [the architecture](docs/architecture.md), [execution semantics](docs/architecture/execution-semantics.md), and [ADRs](docs/adr/), and explain how the change preserves Tower readiness, bounded resources, request lifetime, and transport independence.
 
 ## Set up
 
-Follow [QUICKSTART.md](QUICKSTART.md) for the pinned toolchain and local commands. The workspace contains `crates/netplane` and development tooling in `crates/xtask`.
+Follow [QUICKSTART.md](QUICKSTART.md) for the pinned toolchain and local commands. The workspace contains the transport-independent runtime in `crates/netplane`, the optional adapter in `crates/netplane-http`, and development tooling in `crates/xtask`.
 
 ```bash
 cargo fmt --all -- --check
@@ -167,7 +169,7 @@ Open an [issue](https://github.com/janagor/netplane/issues) for a substantial AP
 
 Use lowercase [Conventional Commit](https://www.conventionalcommits.org/) subjects, such as `docs: establish netplane architecture`. Update documentation for changed behavior and record durable design decisions in `docs/adr/`. Pull requests should include the verification commands run and any relevant limitations.
 
-Netplane remains at version `0.0.0` and `crates/netplane` has `publish = false`. Publishing and compatibility policy will be decided before the first usable release. Do not trigger a release as part of an ordinary contribution.
+Netplane remains at version `0.0.0`; both library crates have `publish = false`. Publishing and compatibility policy will be decided before the first usable release. Do not trigger a release as part of an ordinary contribution.
 
 Report vulnerabilities privately through [the security policy](SECURITY.md), not a public issue.
 
@@ -184,7 +186,7 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 ## Design constraints
 
 1. **Tower interoperability.** Compose with `tower::Service` and preserve its readiness contract. Introduce a Netplane-specific abstraction only when a working prototype shows why it is needed.
-2. **Graph composition.** Model services and policies as validated executable compositions. Decide the graph representation through a small in-memory prototype.
+2. **Graph composition.** Use the implemented single-router `GraphBuilder` for named backend composition and ordinary Tower layers for middleware. Broader graph representations require a concrete use case.
 3. **Immutable publication.** Build and validate a replacement configuration before publishing it. Active graph versions must not be modified in place.
 4. **Request lifetime.** An in-flight request must retain the graph version and resources it needs until completion or cancellation. Readiness and dispatch for an individual request must operate on a consistent service instance and graph version. Graph replacement must not invalidate an outstanding readiness decision or prematurely release resources required by pending requests.
 5. **Backpressure.** Bound concurrency and queues. Do not bypass readiness or spawn unbounded tasks to hide load.
@@ -257,7 +259,7 @@ Calling `Netplane::shutdown(grace_period)` closes admission synchronously across
 
 Calling `ReconfigurationController::shutdown` closes admission under its control mutex before returning the drain future, then clears controller history. Publication and rollback are rejected from that point, including after a timed-out drain. A later call retries the same runtime drain.
 
-## Outside the current runtime
+## Observability and adapter boundary
 
 The runtime emits [structured tracing events](../observability.md) for admission, completion, cancellation, validation, publication, worker termination, and shutdown. Accepted-to-terminal duration includes any time before the first poll. A replaced version is released only after its last owner drops. The optional `netplane-http` adapter selects a version after bounded body collection and decoding. A disconnected client need not immediately drop its handler, and dispatched service work may survive handler cancellation.
 
@@ -445,6 +447,8 @@ Nix users can enter `nix develop`, then run the same Cargo commands. Toolchain c
 Read [the architecture](docs/architecture.md) before changing graph types or adding transport adapters. Add a dependency only with its first consumer. Keep the core independent of sockets, Hyper, Kubernetes, and specific deployment environments.
 
 `GraphDraft::validate()` checks capacity settings and prepares an endpoint with a Tower buffer worker, so call it inside a Tokio runtime. `Netplane::publish()` swaps the active version atomically while running; requests already selected keep their previous version. `Netplane::shutdown(grace_period)` closes admission when called and returns a future that waits for accepted request futures to finish or be dropped. Successful draining releases the active graph, including when handles remain. A timeout leaves admission closed and can be retried; publication remains closed during and after shutdown.
+
+`GraphBuilder` validates one router with named backend services, declared route labels, an explicit fallback, and positive endpoint capacities. It does not support arbitrary DAGs, nested graphs, or dynamic node editing. `ReconfigurationController` adds token-checked publication and bounded rollback history over validated versions.
 
 Run the in-memory transition example with `cargo run -p netplane --example live_reconfiguration`. It changes a direct Backend A service into a router with a simulated authorization filter for Backends A and B while an old request is in progress, then drains accepted work during shutdown. See [execution semantics](docs/architecture/execution-semantics.md) for the guarantees and limits.
 

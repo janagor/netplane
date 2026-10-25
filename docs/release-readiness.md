@@ -1,16 +1,33 @@
-# Initial release readiness
+# Pre-release verification status
 
-Netplane remains at `0.0.0` with `publish = false`. A separate release decision must choose versioning and publication policy.
+This is a source-tree audit for a possible future `0.1.0` decision, not release authorization. The workspace and both library crates remain at `0.0.0` with `publish = false`; no date, tag, or publication is planned here.
 
-- [x] Core and optional HTTP adapter are workspace members; HTTP remains outside the core dependency graph.
-- [x] Core benchmark targets compile on the configured Rust 1.88 toolchain.
-- [x] Core benchmarks smoke-test via `cargo test -p netplane --benches` on Rust 1.88.
-- [x] Execution contract documents synchronous version selection, admission ownership, timeouts, rollback and shutdown.
-- [x] Benchmark modes cover batched and multi-task callers, Tower double-buffered routing baselines, paced and burst resource probes, and yield-once execution.
-- [ ] Collect refreshed tail latency and resource-retention results on a controlled host, including multi-task and burst modes, with longer Criterion sampling than the exploratory baseline.
-- [ ] Review public API docs and external-consumer examples with the intended `0.1.0` surface frozen.
-- [ ] Run format, Clippy, workspace build and tests, documentation tests, package verification and documentation build for the release candidate. The Cargo checks and warning-free rustdoc passed on this working tree; `mdbook` is not installed locally.
-- [x] Inspect `cargo package -p netplane --list` for README, license and manifest metadata. Packaging and verification pass on the working tree with `--allow-dirty --offline`.
-- [ ] Decide whether `netplane-http` is published with the core crate or stays private, and document its version relationship.
-- [x] Replace template-era migration and changelog text with Netplane pre-release notes.
-- [ ] Decide and document the compatibility policy for pre-1.0 versions, then authorize a version change explicitly.
+## Scope and decisions
+
+| Item | Status | Evidence or next decision |
+| --- | --- | --- |
+| Core and HTTP boundary | Complete | `Cargo.toml` lists `netplane`, `netplane-http`, and `xtask`; the adapter depends on the core, not the reverse. |
+| Runtime contract and API review | Complete for current source | [Execution semantics](architecture/execution-semantics.md) and [API review](api-readiness.md) map admission, publication, rollback, shutdown, and HTTP behavior to tests. A frozen `0.1.0` API review remains incomplete. |
+| Performance evidence | Complete for current source | [The baseline](performance-baseline.md) preserves exploratory numbers and records the full longer Criterion run, two task-mode latency runs, and two paced and burst lifetime runs. Further runs would be needed for a regression claim. |
+| Pre-1.0 compatibility policy | Proposed, awaiting decision | [Migration guide](../MIGRATION.md) proposes documenting breaking changes for each minor version and compatible fixes for patch versions. It is not yet a release commitment. |
+| HTTP publication | Open decision | Choose whether `netplane-http` publishes alongside `netplane` or remains private; if published, define its version relationship and verify its package independently. |
+| External consumer | Complete for current core package; release candidate incomplete | Workspace external-consumer tests cover the current APIs. A fresh `/tmp` binary depending on `target/package/netplane-0.0.0` passed `cargo check --offline` and imported public `Capacity` and `RuntimeLimits`. Repeat a full API consumer build against the frozen release candidate and check the HTTP package if publication is approved. |
+| Changelog and migration notes | Complete for unreleased source | [Changelog](../CHANGELOG.md) and [migration guide](../MIGRATION.md) describe current source behavior. Release-specific notes remain for the release decision. |
+
+## Verification record
+
+Run on 2026-10-26 from source commit `e44258e6ff5b610db5cb1a8129f457284aeff4fd` plus documentation-only working-tree changes, with rustc 1.88.0 on NixOS Linux x86_64. A passing local check verifies this source tree and local dependency resolution, not a future release candidate. `Cargo.lock` is ignored in this library workspace.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Format | `cargo fmt --all -- --check` | Passed. |
+| Clippy | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Passed. |
+| Build and tests | `cargo build --workspace`; `cargo test --workspace`; `cargo test --workspace --doc` | Passed. The initial sandboxed workspace test run could not bind local HTTP sockets; the identical command passed with local socket access. |
+| Bench compilation and smoke test | `cargo bench -p netplane --no-run`; `cargo test -p netplane --benches` | Passed, including all four benchmark targets. |
+| Rustdoc | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | Passed. |
+| mdBook | `mdbook build docs` | Passed with mdBook 0.5.4. |
+| Package contents and verification | `cargo package -p netplane --list`; `cargo package -p netplane --allow-dirty --offline` | Passed. The file list includes README, license, source, tests, benches, and examples; Cargo packaged 47 files and verified a build. Packaging does not publish. |
+| Standalone consumer | `cargo check --offline` in a fresh binary with a path dependency on `target/package/netplane-0.0.0` | Passed; the consumer imported and used public capacity and runtime-limit types. This is a smoke build, not full API compatibility certification. |
+| Agent context | `cargo run -p xtask -- agents validate`; `cargo run -p xtask -- agents check-context` | Passed; generated `llms.txt` and `llms-full.txt` match their sources. |
+
+Before a release decision, repeat this matrix on the chosen commit, review the packaged file list and generated rustdoc, resolve the two open publication and compatibility decisions, and leave version changes for a separate PR.

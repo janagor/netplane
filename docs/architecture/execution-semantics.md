@@ -30,7 +30,7 @@ Calling `Netplane::shutdown(grace_period)` closes admission synchronously across
 
 Calling `ReconfigurationController::shutdown` closes admission under its control mutex before returning the drain future, then clears controller history. Publication and rollback are rejected from that point, including after a timed-out drain. A later call retries the same runtime drain.
 
-## Outside the current runtime
+## Observability and adapter boundary
 
 The runtime emits [structured tracing events](../observability.md) for admission, completion, cancellation, validation, publication, worker termination, and shutdown. Accepted-to-terminal duration includes any time before the first poll. A replaced version is released only after its last owner drops. The optional `netplane-http` adapter selects a version after bounded body collection and decoding. A disconnected client need not immediately drop its handler, and dispatched service work may survive handler cancellation.
 
