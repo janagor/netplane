@@ -16,3 +16,5 @@ Netplane has not been released. Version and workspace manifests remain at `0.0.0
 ### Documentation
 
 - Release-readiness checklist and updated core crate guidance for routing, controller publication, deadlines and rollback.
+- Reconciled contributor and agent documentation with the implemented HTTP adapter, single-router builder, and reconfiguration controller.
+- Added a follow-up performance run and evidence-backed pre-release audit without changing runtime behavior or publication settings.
