@@ -9,6 +9,14 @@ use super::{
     config::{BackendBehavior, PolicyConfig},
 };
 
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub struct BackendGate {
+    pub armed: std::sync::atomic::AtomicBool,
+    pub entered: tokio::sync::Notify,
+    pub release: tokio::sync::Notify,
+}
+
 fn response(status: StatusCode, body: Bytes) -> HttpResponse {
     let mut response = Response::new(body);
     *response.status_mut() = status;
@@ -20,9 +28,20 @@ fn processing_backend(
     behavior: BackendBehavior,
     revision: HeaderValue,
 ) -> BoxService<HttpRequest, HttpResponse, Infallible> {
+    #[cfg(test)]
+    let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let service = service_fn(move |request: HttpRequest| {
+        #[cfg(test)]
+        let counter = counter.clone();
         let behavior = behavior.clone();
         async move {
+            #[cfg(test)]
+            if let Some(gate) = &behavior.gate {
+                if gate.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    gate.entered.notify_one();
+                    gate.release.notified().await;
+                }
+            }
             if !behavior.delay.is_zero() {
                 tokio::time::sleep(behavior.delay).await;
             }
@@ -32,13 +51,23 @@ fn processing_backend(
                     Bytes::new(),
                 ));
             }
-            Ok(response(
+            let response = response(
                 StatusCode::OK,
                 Bytes::from(format!(
                     "backend={name};processed_bytes={}",
                     request.body().len()
                 )),
-            ))
+            );
+            #[cfg(test)]
+            let mut response = response;
+            #[cfg(test)]
+            if behavior.count_calls {
+                let count = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if let Ok(value) = HeaderValue::from_str(&count.to_string()) {
+                    response.headers_mut().insert("x-service-count", value);
+                }
+            }
+            Ok(response)
         }
     });
     ServiceBuilder::new()

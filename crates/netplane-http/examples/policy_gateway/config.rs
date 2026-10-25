@@ -7,6 +7,10 @@ use netplane_http::HttpLimits;
 pub struct BackendBehavior {
     pub delay: Duration,
     pub fail: bool,
+    #[cfg(test)]
+    pub gate: Option<std::sync::Arc<super::backends::BackendGate>>,
+    #[cfg(test)]
+    pub count_calls: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +50,7 @@ impl PolicyConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct GatewayConfig {
     pub listen: SocketAddr,
     pub policy: PolicyConfig,
@@ -63,17 +68,25 @@ impl Default for GatewayConfig {
             buffer_capacity: 64,
         };
         Self {
-            listen: SocketAddr::from(([127, 0, 0, 1], 3001)),
+            listen: SocketAddr::from(([127, 0, 0, 1], 3000)),
             policy: PolicyConfig {
                 revision: 1,
                 canary_percent: 25,
                 stable: BackendBehavior {
                     delay: Duration::ZERO,
                     fail: false,
+                    #[cfg(test)]
+                    gate: None,
+                    #[cfg(test)]
+                    count_calls: false,
                 },
                 canary: BackendBehavior {
                     delay: Duration::from_millis(25),
                     fail: false,
+                    #[cfg(test)]
+                    gate: None,
+                    #[cfg(test)]
+                    count_calls: false,
                 },
             },
             outer_capacity: capacity,

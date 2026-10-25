@@ -297,3 +297,22 @@ async fn handles_concurrent_http_requests() -> Result<(), BoxError> {
     drain_result?;
     Ok(())
 }
+
+#[path = "admin_tests.rs"]
+mod admin_tests;
+
+#[test]
+fn admin_token_configuration_rejects_invalid_values() -> Result<(), BoxError> {
+    use std::env::VarError;
+    assert!(super::configured_admin_token(Err(VarError::NotPresent))?.is_none());
+    assert!(super::configured_admin_token(Ok(String::new())).is_err());
+    assert!(super::configured_admin_token(Ok("abcdefghijklmnop\n".into())).is_err());
+    assert!(super::configured_admin_token(Ok("abcdefghijklmnop".into()))?.is_some());
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let non_unicode = std::ffi::OsString::from_vec(vec![0xff]);
+        assert!(super::configured_admin_token(Err(VarError::NotUnicode(non_unicode))).is_err());
+    }
+    Ok(())
+}
