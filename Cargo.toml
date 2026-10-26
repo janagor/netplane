@@ -101,6 +101,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
 clap = { version = "4", features = ["derive", "env"] }
+hdrhistogram = "7.6"
 # Note: native `async fn` in traits (1.75+) is still not dyn-compatible.
 # Prefer manual `Pin<Box<dyn Future + Send + '_>>` (see storage/MCP templates)
 # or add `async-trait` only when a crate actually uses `#[async_trait]`.

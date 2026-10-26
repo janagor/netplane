@@ -63,6 +63,11 @@ jobs:
       - name: Smoke-test core benchmarks on MSRV
         if: matrix.os == 'ubuntu-latest' && matrix.rust == '1.88'
         run: cargo test -p netplane --benches
+      - name: Smoke-test operational harness on MSRV
+        if: matrix.os == 'ubuntu-latest' && matrix.rust == '1.88'
+        run: |
+          cargo run --release -p netplane --example operational_probe -- --profile smoke --scenario two-balanced --output target/operational-smoke.json
+          python3 -c 'import json; r=json.load(open("target/operational-smoke.json")); m=r["metrics"]; assert r["schema_version"]==2; assert m["measurement_complete"] is True; assert m["missing_latency_samples"]==0; assert m["completed"]>0 and m["completed"]==m["admitted"] and m["runtime_errors"]==0'
       - name: Verify library package
         if: matrix.os == 'ubuntu-latest'
         run: cargo package -p netplane

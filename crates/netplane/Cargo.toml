@@ -28,8 +28,12 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+clap.workspace = true
 criterion.workspace = true
 futures-util.workspace = true
+hdrhistogram.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tracing-subscriber = { version = "0.3", features = ["registry", "fmt", "env-filter"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tower = { workspace = true, features = ["filter"] }
@@ -49,3 +53,7 @@ harness = false
 [[bench]]
 name = "lifecycle"
 harness = false
+
+[[example]]
+name = "operational_probe"
+path = "examples/operational_probe/main.rs"

@@ -1,5 +1,7 @@
 # Performance measurement
 
+For sustained concurrent traffic, matched Tower admission, publication under load, resource retention, JSON results, and paired revision comparisons, see [Operational benchmarks](operational-benchmarks.md). This page preserves the Criterion methodology and historical baseline context.
+
 The Criterion benchmarks in `crates/netplane/benches` use in-memory Tower services and no network transport. The default service adds one to a `u64` and returns an immediately ready future. Each benchmark builds a four-worker Tokio runtime outside timed iterations, warms request paths before measurement, and checks response values. No tracing subscriber is installed. Criterion reports wall-clock time per iteration; concurrent iterations contain 128 completed requests, so their `Elements` throughput is requests per second.
 
 ## Reproduce
