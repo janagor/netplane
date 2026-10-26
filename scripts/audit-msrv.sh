@@ -145,7 +145,7 @@ info "Verifying MSRV toolchain compiles workspace..."
 # Check if the MSRV toolchain is installed
 if command -v rustup &>/dev/null; then
   if rustup toolchain list | grep -q "$MSRV"; then
-    if ! cargo +"$MSRV" check --workspace 2>/dev/null; then
+    if ! rustup run "$MSRV" cargo check --workspace; then
       fail "Workspace does not compile with MSRV toolchain $MSRV"
     else
       pass "Workspace compiles with MSRV toolchain $MSRV"
