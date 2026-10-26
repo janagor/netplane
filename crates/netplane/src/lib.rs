@@ -24,6 +24,7 @@ mod handle;
 pub use endpoint::Endpoint;
 mod lifecycle;
 mod observability;
+mod routed;
 pub use graph::{
     BackendCapacityMetadata, GraphBuildError, GraphBuilder, GraphMetadata, NodeKind, NodeMetadata,
     RouteMetadata,
@@ -39,7 +40,7 @@ const NO_PREVIOUS_VERSION: u64 = 0;
 const INITIAL_REQUEST_ID: u64 = 1;
 const INITIAL_SHUTDOWN_ATTEMPT_ID: u64 = 1;
 
-/// Capacity settings for one endpoint.
+/// Concurrency and Tower buffer capacity for one endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capacity {
     /// Maximum requests executing in the underlying service at once.
@@ -180,7 +181,7 @@ impl<S> GraphDraft<S> {
         tracing::debug!(target: "netplane", event = "graph.validated", node_count = 1_u64, route_count = 0_u64);
         Ok(GraphVersion {
             endpoint_ids: vec![endpoint.id()],
-            endpoint,
+            execution: ExecutionGraph::Buffered(endpoint),
             metadata: GraphMetadata::single_root(self.capacity),
         })
     }
@@ -188,7 +189,7 @@ impl<S> GraphDraft<S> {
 
 /// One validated, immutable Tower composition and its capacity limits.
 pub struct GraphVersion<Request: Send, Response> {
-    endpoint: Endpoint<Request, Response>,
+    execution: ExecutionGraph<Request, Response>,
     endpoint_ids: Vec<u64>,
     metadata: GraphMetadata,
 }
@@ -198,6 +199,66 @@ impl<Request: Send, Response> GraphVersion<Request, Response> {
     #[must_use]
     pub const fn metadata(&self) -> &GraphMetadata {
         &self.metadata
+    }
+}
+
+impl<Request, Response> GraphVersion<Request, Response>
+where
+    Request: Send + 'static,
+    Response: Send + 'static,
+{
+    pub(crate) fn execute(&self, request: Request) -> GraphExecution<Request, Response> {
+        match &self.execution {
+            ExecutionGraph::Buffered(endpoint) => GraphExecution::Buffered {
+                inner: endpoint.execute_owned(request),
+            },
+            ExecutionGraph::BackendOnly(routed) => GraphExecution::BackendOnly {
+                inner: routed.execute(request),
+            },
+        }
+    }
+}
+
+pub(crate) enum ExecutionGraph<Request: Send, Response> {
+    Buffered(Endpoint<Request, Response>),
+    BackendOnly(routed::RoutedGraph<Request, Response>),
+}
+
+pin_project_lite::pin_project! {
+    #[project = GraphExecutionProj]
+    pub(crate) enum GraphExecution<Request, Response>
+    where
+        Request: Send,
+        Request: 'static,
+        Response: Send,
+        Response: 'static,
+    {
+        Buffered {
+            #[pin]
+            inner: endpoint::EndpointExecution<Request, Response>,
+        },
+        BackendOnly {
+            #[pin]
+            inner: routed::RoutedExecution<Request, Response>,
+        },
+    }
+}
+
+impl<Request, Response> Future for GraphExecution<Request, Response>
+where
+    Request: Send + 'static,
+    Response: Send + 'static,
+{
+    type Output = Result<Response, BoxError>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match self.project() {
+            GraphExecutionProj::Buffered { inner } => inner.poll(cx),
+            GraphExecutionProj::BackendOnly { inner } => inner.poll(cx),
+        }
     }
 }
 

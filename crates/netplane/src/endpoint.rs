@@ -43,7 +43,8 @@ impl Drop for WorkerOwner {
 }
 
 pin_project! {
-    struct RetainedExecution<Request, Response>
+    /// Future returned by [`Endpoint::execute`].
+    pub(crate) struct EndpointExecution<Request, Response>
     where
         Request: Send,
         Request: 'static,
@@ -57,7 +58,7 @@ pin_project! {
 }
 
 impl<Request: Send + 'static, Response: Send + 'static> Future
-    for RetainedExecution<Request, Response>
+    for EndpointExecution<Request, Response>
 {
     type Output = Result<Response, BoxError>;
 
@@ -137,9 +138,13 @@ where
         request: Request,
     ) -> impl Future<Output = Result<Response, BoxError>> + Send + 'static + use<Request, Response>
     {
+        self.execute_owned(request)
+    }
+
+    pub(crate) fn execute_owned(&self, request: Request) -> EndpointExecution<Request, Response> {
         let worker = Arc::clone(&self.worker);
         let execution = self.buffer.clone().oneshot(request);
-        RetainedExecution {
+        EndpointExecution {
             execution,
             _worker: worker,
         }

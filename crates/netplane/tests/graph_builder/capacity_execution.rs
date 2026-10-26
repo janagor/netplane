@@ -2,6 +2,47 @@ use super::*;
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore};
 
+#[tokio::test]
+async fn backend_only_keeps_each_backend_concurrency_limit() -> Result<(), BoxError> {
+    let started = Arc::new(AtomicUsize::new(0));
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let signal = Arc::new(Notify::new());
+    let gate = Arc::new(Semaphore::new(0));
+    let graph = GraphBuilder::new()
+        .service_with_capacity(
+            "backend",
+            gated_backend(
+                "backend",
+                started.clone(),
+                active.clone(),
+                peak.clone(),
+                signal.clone(),
+                gate.clone(),
+            ),
+            Capacity {
+                max_in_flight: 1,
+                buffer_capacity: 2,
+            },
+        )
+        .router("router", |_: &Request| "backend")
+        .fallback("router", "backend")
+        .entry("router")
+        .without_outer_capacity()
+        .validate()?;
+    let runtime = Netplane::new(graph, RuntimeLimits { max_outstanding: 2 })?;
+    let first = tokio::spawn(runtime.handle().execute(1));
+    let second = tokio::spawn(runtime.handle().execute(2));
+    wait_for(&started, &signal, 1).await?;
+    assert_eq!(started.load(Ordering::SeqCst), 1);
+    assert_eq!(peak.load(Ordering::SeqCst), 1);
+    gate.add_permits(2);
+    assert_eq!(first.await??, "backend:1");
+    assert_eq!(second.await??, "backend:2");
+    assert_eq!(peak.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
 fn gated_backend(
     name: &'static str,
     started: Arc<AtomicUsize>,

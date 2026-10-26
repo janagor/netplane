@@ -62,9 +62,50 @@ async fn routes_and_metadata_are_deterministic() -> Result<(), BoxError> {
     );
     assert_eq!(metadata.routes[0].label, "even");
     assert_eq!(metadata.fallback.as_deref(), Some("b"));
+    assert_eq!(
+        metadata.capacity,
+        Some(Capacity {
+            max_in_flight: 32,
+            buffer_capacity: 64
+        })
+    );
     let runtime = Netplane::new(graph, RuntimeLimits { max_outstanding: 2 })?;
     assert_eq!(runtime.handle().execute(2).await?, "a:2");
     assert_eq!(runtime.handle().execute(3).await?, "b:3");
+    Ok(())
+}
+
+#[tokio::test]
+async fn backend_only_metadata_and_capacity_conflicts() -> Result<(), BoxError> {
+    let graph = builder().without_outer_capacity().validate()?;
+    assert_eq!(graph.metadata().capacity, None);
+    assert_eq!(
+        graph.metadata().backend_capacity,
+        Some(Capacity {
+            max_in_flight: 32,
+            buffer_capacity: 64
+        })
+    );
+    let runtime = Netplane::new(graph, RuntimeLimits { max_outstanding: 2 })?;
+    assert_eq!(runtime.handle().execute(2).await?, "a:2");
+    let capacity = Capacity {
+        max_in_flight: 32,
+        buffer_capacity: 64,
+    };
+    assert!(matches!(
+        builder()
+            .capacity(capacity)
+            .without_outer_capacity()
+            .validate(),
+        Err(GraphBuildError::ConflictingOuterCapacity)
+    ));
+    assert!(matches!(
+        builder()
+            .without_outer_capacity()
+            .capacity(capacity)
+            .validate(),
+        Err(GraphBuildError::ConflictingOuterCapacity)
+    ));
     Ok(())
 }
 

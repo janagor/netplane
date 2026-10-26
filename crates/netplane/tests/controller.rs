@@ -25,6 +25,51 @@ fn graph(value: usize) -> Result<netplane::GraphVersion<usize, usize>, netplane:
     .validate()
 }
 
+fn backend_only_graph(
+    value: usize,
+) -> Result<netplane::GraphVersion<usize, usize>, netplane::GraphBuildError> {
+    GraphBuilder::new()
+        .service(
+            "backend",
+            service_fn(move |_: usize| async move { Ok::<_, Infallible>(value) }),
+        )
+        .router("router", |_: &usize| "backend")
+        .fallback("router", "backend")
+        .entry("router")
+        .without_outer_capacity()
+        .validate()
+}
+
+#[tokio::test]
+async fn backend_only_rollback_republishes_executable_state() -> TestResult {
+    let runtime = Netplane::new(
+        backend_only_graph(11)?,
+        RuntimeLimits { max_outstanding: 2 },
+    )?;
+    let control = ReconfigurationController::new(runtime, ControllerOptions::default());
+    let original = control.inspect().active.ok_or("missing active")?.id;
+    let selected = control.handle().try_execute(0)?;
+    control.publish_if_current(
+        control.current_token().ok_or("missing token")?,
+        backend_only_graph(22)?,
+    )?;
+    assert_eq!(selected.await?, 11);
+    assert_eq!(control.handle().execute(0).await?, 22);
+    control.rollback_if_current(control.current_token().ok_or("missing token")?, original)?;
+    assert_eq!(control.handle().execute(0).await?, 11);
+    assert_eq!(
+        control
+            .inspect()
+            .active
+            .ok_or("missing active")?
+            .metadata
+            .capacity,
+        None
+    );
+    control.shutdown(Duration::from_secs(1)).await?;
+    Ok(())
+}
+
 fn controller(
     limit: usize,
 ) -> Result<ReconfigurationController<usize, usize>, netplane::ConfigError> {

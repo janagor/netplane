@@ -90,7 +90,7 @@ where
         let version = self.active.load_full().ok_or(AdmissionError::Closed)?;
         let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let observation = RequestObservation::new(self.runtime_id, version.id.get(), request_id);
-        let execution = version.graph.endpoint.execute(request);
+        let execution = version.graph.execute(request);
         let execution = async move {
             if let Some(deadline) = deadline {
                 if tokio::time::Instant::now() >= deadline {

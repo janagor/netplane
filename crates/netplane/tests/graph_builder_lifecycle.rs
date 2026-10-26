@@ -92,7 +92,15 @@ fn graph(
     polled: oneshot::Sender<()>,
     outer: usize,
 ) -> Result<netplane::GraphVersion<u32, String>, GraphBuildError> {
-    GraphBuilder::new()
+    graph_with_policy(state, polled, Some(outer))
+}
+
+fn graph_with_policy(
+    state: Arc<GateState>,
+    polled: oneshot::Sender<()>,
+    outer: Option<usize>,
+) -> Result<netplane::GraphVersion<u32, String>, GraphBuildError> {
+    let builder = GraphBuilder::new()
         .service(
             "a",
             GatedBackend {
@@ -111,15 +119,88 @@ fn graph(
         .route("dispatch", "b", "b")
         .fallback("dispatch", "b")
         .entry("dispatch")
-        .capacity(Capacity {
-            max_in_flight: outer,
-            buffer_capacity: 2,
-        })
         .backend_capacity(Capacity {
             max_in_flight: 1,
             buffer_capacity: 1,
-        })
-        .validate()
+        });
+    match outer {
+        Some(limit) => builder
+            .capacity(Capacity {
+                max_in_flight: limit,
+                buffer_capacity: 2,
+            })
+            .validate(),
+        None => builder.without_outer_capacity().validate(),
+    }
+}
+
+#[tokio::test]
+async fn backend_only_progresses_independently_and_retains_unpolled_version() -> Result<(), BoxError>
+{
+    timeout(DEADLINE, async {
+        let state = GateState::new();
+        let (polled, observed) = oneshot::channel();
+        let mut runtime = Netplane::new(
+            graph_with_policy(state.clone(), polled, None)?,
+            RuntimeLimits { max_outstanding: 2 },
+        )?;
+        let handle = runtime.handle();
+        let waiting = tokio::spawn(handle.execute(2));
+        observed.await?;
+        let retained = handle.try_execute(3)?;
+        assert!(matches!(
+            handle.try_execute(5),
+            Err(AdmissionError::AtCapacity { .. })
+        ));
+        assert_eq!(retained.await?, "B:3");
+        runtime.publish(
+            GraphBuilder::new()
+                .service(
+                    "new",
+                    service_fn(|request: u32| async move {
+                        Ok::<_, Infallible>(format!("N:{request}"))
+                    }),
+                )
+                .router("dispatch", |_: &u32| "new")
+                .fallback("dispatch", "new")
+                .entry("dispatch")
+                .without_outer_capacity()
+                .validate()?,
+        )?;
+        assert_eq!(handle.execute(5).await?, "N:5");
+        state.open();
+        assert_eq!(waiting.await??, "A:2");
+        runtime.shutdown(Duration::from_secs(1)).await?;
+        Ok::<_, BoxError>(())
+    })
+    .await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn backend_only_deadline_and_cancel_release_global_slots() -> Result<(), BoxError> {
+    timeout(DEADLINE, async {
+        let state = GateState::new();
+        let (polled, observed) = oneshot::channel();
+        let runtime = Netplane::new(
+            graph_with_policy(state, polled, None)?,
+            RuntimeLimits { max_outstanding: 1 },
+        )?;
+        let handle = runtime.handle();
+        let pending =
+            handle.try_execute_until(2, tokio::time::Instant::now() + Duration::from_millis(20))?;
+        let task = tokio::spawn(pending);
+        observed.await?;
+        assert!(task.await?.is_err());
+        assert_eq!(handle.status().outstanding, 0);
+        let cancelled = handle.try_execute(2)?;
+        drop(cancelled);
+        assert_eq!(handle.status().outstanding, 0);
+        assert_eq!(handle.execute(3).await?, "B:3");
+        Ok::<_, BoxError>(())
+    })
+    .await??;
+    Ok(())
 }
 
 #[tokio::test]
@@ -404,5 +485,73 @@ async fn readiness_publication_wakeups_across_threads() -> Result<(), BoxError> 
         Ok::<_, BoxError>(())
     })
     .await??;
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn backend_only_unpolled_future_does_not_invoke_selector() -> Result<(), BoxError> {
+    let selections = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&selections);
+    let runtime = Netplane::new(
+        GraphBuilder::new()
+            .service(
+                "b",
+                service_fn(
+                    |request: u32| async move { Ok::<_, Infallible>(format!("B:{request}")) },
+                ),
+            )
+            .router("dispatch", move |_: &u32| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                "b"
+            })
+            .route("dispatch", "b", "b")
+            .fallback("dispatch", "b")
+            .entry("dispatch")
+            .without_outer_capacity()
+            .validate()?,
+        RuntimeLimits { max_outstanding: 2 },
+    )?;
+    let handle = runtime.handle();
+    let unpolled = handle.try_execute(1)?;
+    assert_eq!(selections.load(Ordering::SeqCst), 0);
+    drop(unpolled);
+    assert_eq!(selections.load(Ordering::SeqCst), 0);
+    assert_eq!(handle.execute(2).await?, "B:2");
+    assert_eq!(selections.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn backend_only_pre_expired_deadline_does_not_invoke_selector() -> Result<(), BoxError> {
+    let selections = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&selections);
+    let runtime = Netplane::new(
+        GraphBuilder::new()
+            .service(
+                "b",
+                service_fn(
+                    |request: u32| async move { Ok::<_, Infallible>(format!("B:{request}")) },
+                ),
+            )
+            .router("dispatch", move |_: &u32| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                "b"
+            })
+            .route("dispatch", "b", "b")
+            .fallback("dispatch", "b")
+            .entry("dispatch")
+            .without_outer_capacity()
+            .validate()?,
+        RuntimeLimits { max_outstanding: 1 },
+    )?;
+    let handle = runtime.handle();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let pending = handle.try_execute_until(1, deadline)?;
+    assert_eq!(selections.load(Ordering::SeqCst), 0);
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert!(pending.await.is_err());
+    assert_eq!(selections.load(Ordering::SeqCst), 0);
+    assert_eq!(handle.execute(2).await?, "B:2");
+    assert_eq!(selections.load(Ordering::SeqCst), 1);
     Ok(())
 }

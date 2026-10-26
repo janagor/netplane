@@ -9,7 +9,7 @@ use std::{
 use thiserror::Error;
 use tower::{BoxError, Service, ServiceExt, service_fn, util::BoxService};
 
-use crate::{Capacity, ConfigError, Endpoint, GraphVersion};
+use crate::{Capacity, ConfigError, Endpoint, ExecutionGraph, GraphVersion};
 
 mod metadata;
 pub use metadata::{BackendCapacityMetadata, GraphMetadata, NodeKind, NodeMetadata, RouteMetadata};
@@ -44,6 +44,9 @@ pub enum GraphBuildError {
     /// An endpoint capacity is invalid.
     #[error("invalid capacity: {0}")]
     Capacity(#[from] ConfigError),
+    /// An explicit outer capacity conflicts with backend-only execution.
+    #[error("outer capacity cannot be set with without_outer_capacity")]
+    ConflictingOuterCapacity,
 }
 
 struct Router<Request> {
@@ -57,7 +60,7 @@ struct RegisteredService<Request, Response> {
     service: BoxService<Request, Response, BoxError>,
     capacity_override: Option<Capacity>,
 }
-/// Builds one router that selects among named, independently bounded Tower services.
+/// Builds a double-buffered router over named, bounded Tower services by default.
 ///
 /// Register ordinary `ServiceBuilder` compositions as services to use middleware.
 /// Duplicate declarations are recorded and reported by [`Self::validate`].
@@ -66,6 +69,8 @@ pub struct GraphBuilder<Request, Response> {
     router: Option<Router<Request>>,
     entry: Option<String>,
     capacity: Capacity,
+    capacity_explicit: bool,
+    without_outer_capacity: bool,
     backend_capacity: Capacity,
     error: Option<GraphBuildError>,
 }
@@ -89,6 +94,8 @@ impl<Request, Response> GraphBuilder<Request, Response> {
             router: None,
             entry: None,
             capacity,
+            capacity_explicit: false,
+            without_outer_capacity: false,
             backend_capacity: capacity,
             error: None,
         }
@@ -162,8 +169,7 @@ impl<Request, Response> GraphBuilder<Request, Response> {
     /// Register the single request-dependent router.
     ///
     /// The selector's output is matched against declared labels. Unknown labels
-    /// use the explicit fallback. The selector runs synchronously on dispatch.
-    /// Static labels are borrowed without allocation; dynamic labels may be owned.
+    /// use the explicit fallback. Selection is synchronous at dispatch or admission.
     #[must_use]
     pub fn router<F, L>(mut self, name: impl Into<String>, selector: F) -> Self
     where
@@ -249,10 +255,25 @@ impl<Request, Response> GraphBuilder<Request, Response> {
         self
     }
 
-    /// Set the outer version capacity.
+    /// Set the outer Tower endpoint capacity for buffered execution.
+    ///
+    /// Combining this with [`Self::without_outer_capacity`] fails validation,
+    /// regardless of method call order.
     #[must_use]
     pub const fn capacity(mut self, capacity: Capacity) -> Self {
         self.capacity = capacity;
+        self.capacity_explicit = true;
+        self
+    }
+
+    /// Route directly to backend endpoints without an outer execution limit.
+    ///
+    /// Backend capacities and [`crate::RuntimeLimits::max_outstanding`] still
+    /// apply. This removes aggregate per-version concurrency and buffer limits.
+    /// Combining it with an explicit [`Self::capacity`] fails validation.
+    #[must_use]
+    pub const fn without_outer_capacity(mut self) -> Self {
+        self.without_outer_capacity = true;
         self
     }
 
@@ -271,12 +292,15 @@ where
     Request: Send + 'static,
     Response: Send + 'static,
 {
-    /// Validate the complete declaration, then start workers and compile a version.
+    /// Validate the complete declaration, then start its Tower workers.
     ///
     /// Invalid declarations start no workers. Call inside an active Tokio runtime.
-    /// The router reports readiness before selecting a backend; backend readiness
-    /// and dispatch occur in the selected endpoint worker. A saturated branch can
-    /// occupy outer execution slots and delay other branches.
+    /// Buffered execution has an outer worker and one worker per backend.
+    /// Backend-only execution has only backend workers. In both policies,
+    /// `Handle` admission selects the graph version synchronously; route
+    /// selection runs when the accepted future is first polled (or, for
+    /// buffered mode, when the outer worker dequeues the request). A saturated
+    /// branch can occupy outer execution slots only in buffered mode.
     ///
     /// # Errors
     /// Returns [`GraphBuildError`] for invalid declarations or capacities.
@@ -355,19 +379,28 @@ where
             .cloned()
             .ok_or_else(|| GraphBuildError::UnknownTarget(fallback.clone()))?;
         let mut endpoint_ids: Vec<u64> = endpoints.values().map(Endpoint::id).collect();
-        let selector = router.selector;
-        let root = service_fn(move |request: Request| {
-            let label = selector(&request);
-            let endpoint = resolved_routes
-                .get(label.as_ref())
-                .unwrap_or(&fallback_endpoint)
-                .clone();
-            async move { endpoint.execute(request).await }
-        });
-        let endpoint = Endpoint::new(root, self.capacity)?;
-        endpoint_ids.push(endpoint.id());
+        let execution = if self.without_outer_capacity {
+            ExecutionGraph::BackendOnly(crate::routed::RoutedGraph::new(
+                router.selector,
+                resolved_routes,
+                fallback_endpoint,
+            ))
+        } else {
+            let selector = router.selector;
+            let root = service_fn(move |request: Request| {
+                let label = selector(&request);
+                let endpoint = resolved_routes
+                    .get(label.as_ref())
+                    .unwrap_or(&fallback_endpoint)
+                    .clone();
+                async move { endpoint.execute(request).await }
+            });
+            let endpoint = Endpoint::new(root, self.capacity)?;
+            endpoint_ids.push(endpoint.id());
+            ExecutionGraph::Buffered(endpoint)
+        };
         Ok(GraphVersion {
-            endpoint,
+            execution,
             endpoint_ids,
             metadata,
         })
@@ -396,7 +429,7 @@ where
                 })
                 .collect(),
             fallback: Some(fallback.into()),
-            capacity: self.capacity,
+            capacity: (!self.without_outer_capacity).then_some(self.capacity),
             backend_capacity: Some(self.backend_capacity),
             backend_capacities: self
                 .services
@@ -416,7 +449,12 @@ where
         router: &Router<Request>,
         fallback: &str,
     ) -> Result<(), GraphBuildError> {
-        validate_capacity(self.capacity)?;
+        if self.without_outer_capacity && self.capacity_explicit {
+            return Err(GraphBuildError::ConflictingOuterCapacity);
+        }
+        if !self.without_outer_capacity {
+            validate_capacity(self.capacity)?;
+        }
         validate_capacity(self.backend_capacity)?;
         for registered in self.services.values() {
             if let Some(capacity) = registered.capacity_override {
@@ -458,6 +496,7 @@ impl GraphBuildError {
             Self::MissingFallback => "missing_fallback",
             Self::UnsupportedTopology(_) => "unsupported_topology",
             Self::Capacity(error) => crate::config_error_kind(error),
+            Self::ConflictingOuterCapacity => "conflicting_outer_capacity",
         }
     }
 }

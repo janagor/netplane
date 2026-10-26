@@ -43,8 +43,8 @@ pub struct GraphMetadata {
     pub routes: Vec<RouteMetadata>,
     /// Explicit fallback target, if a router exists.
     pub fallback: Option<String>,
-    /// Capacity of the outer version endpoint.
-    pub capacity: Capacity,
+    /// Outer version endpoint capacity, or `None` for backend-only routing.
+    pub capacity: Option<Capacity>,
     /// Configured default backend capacity, if a router exists.
     pub backend_capacity: Option<Capacity>,
     /// Effective backend capacities sorted by name; empty for a single root.
@@ -61,7 +61,7 @@ impl GraphMetadata {
             }],
             routes: Vec::new(),
             fallback: None,
-            capacity,
+            capacity: Some(capacity),
             backend_capacity: None,
             backend_capacities: Vec::new(),
         }

@@ -159,7 +159,7 @@ async fn graph_metadata_matches_topology() -> Result<(), BoxError> {
     assert_eq!(metadata.nodes.len(), 4);
     assert_eq!(metadata.routes.len(), 2);
     assert_eq!(metadata.fallback.as_deref(), Some("fallback"));
-    assert_eq!(metadata.capacity, config.outer_capacity);
+    assert_eq!(metadata.capacity, Some(config.outer_capacity));
     assert_eq!(metadata.backend_capacity, Some(config.backend_capacity));
     Ok(())
 }
