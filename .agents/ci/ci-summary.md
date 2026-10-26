@@ -1,21 +1,28 @@
 # Quality Gate Run Summary
 
-**Timestamp:** 2026-10-13T11:58:47Z
-**Commit:** ff2c60c0bf169d7e0ee5e1713003bf25422e8fd4
-**Branch:** jules-5748825285344166918-ca5f1e4b
+**Timestamp:** 2026-10-26T11:51:02Z
+**Commit:** dd18c8713cf1060c6a57ab32a589de3aa530a936
+**Branch:** main
 
 | Check | Status | Details |
 |---|---|---|
-| LOC Limits | ✅ success | Passed in 23.573312ms |
-| Rust Format | ✅ success | Passed in 450.33441ms |
-| Rust Clippy | ✅ success | Passed in 164.059131641s |
-| Rust Build | ✅ success | Passed in 58.76823618s |
-| Rust Tests | ✅ success | Passed in 32.417819256s |
-| Rust Doc Tests | ✅ success | Passed in 24.462285923s |
-| Skill Validation | ✅ success | Passed in 1.175307995s |
-| Skill Evaluations | ✅ success | Passed in 12.849395828s |
-| Privacy Check (No emails) | ✅ success | Passed in 65.499754ms |
-| Secret Scan | ✅ success | Passed in 127.372038ms |
-| GitHub Actions Workflow Validation | ✅ success | Passed in 6.904725028s |
+| LOC Limits | ✅ success | Passed in 6.326555ms |
+| Rust Format | ✅ success | Passed in 241.339393ms |
+| Rust Clippy | ✅ success | Passed in 139.547769ms |
+| Rust Build | ✅ success | Passed in 122.13621ms |
+| Rust Tests | ✅ success | Passed in 834.280848ms |
+| Rust Doc Tests | ✅ success | Passed in 147.215475ms |
+| Rust Security Audit | ✅ success | Passed in 1.653512735s |
+| Rust Dependency Policy (Deny) | ✅ success | Passed in 770.794335ms |
+| Rust Unused Dependencies (Machete) | ✅ success | Passed in 30.249637ms |
+| Rust MSRV Audit | ✅ success | Passed in 206.033624ms |
+| Shell Script Lint (ShellCheck) | ✅ success | Passed in 1.453809993s |
+| Markdown Lint (markdownlint-cli2) | ✅ success | Passed in 806.520911ms |
+| Skill Validation | ✅ success | Passed in 776.490993ms |
+| Skill Evaluations | ✅ success | Passed in 1.754320812s |
+| Privacy Check (No emails) | ✅ success | Passed in 23.874333ms |
+| Secret Scan | ✅ success | Passed in 51.036377ms |
+| GitHub Actions Workflow Validation | ✅ success | Passed in 277.008295ms |
+| CI Status Artifact Check | ✅ success | Passed in 116.877µs |
 
 ## Overall: **SUCCESS**
