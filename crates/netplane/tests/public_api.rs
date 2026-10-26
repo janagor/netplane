@@ -39,9 +39,10 @@ async fn external_consumer_can_route_reconfigure_and_drain()
 
     let snapshot = controller.inspect();
     let routed = GraphBuilder::<u64, u64>::new()
-        .service(
+        .service_with_capacity(
             "primary",
             service_fn(|value: u64| async move { Ok::<_, Infallible>(value + 10) }),
+            capacity(),
         )
         .router("router", |_value: &u64| "primary")
         .route("router", "primary", "primary")
@@ -52,6 +53,16 @@ async fn external_consumer_can_route_reconfigure_and_drain()
         .validate()?;
     let token = snapshot.token.ok_or("missing publication token")?;
     let outcome = controller.publish_if_current(token, routed)?;
+    let published = controller.inspect();
+    let backend_capacities = &published
+        .active
+        .as_ref()
+        .ok_or("missing active version")?
+        .metadata
+        .backend_capacities;
+    assert_eq!(backend_capacities.len(), 1);
+    assert_eq!(backend_capacities[0].name, "primary");
+    assert_eq!(backend_capacities[0].capacity, capacity());
     assert_eq!(old.await?, 2);
     assert_eq!(handle.execute(1).await?, 11);
     let next = controller.current_token().ok_or("missing next token")?;

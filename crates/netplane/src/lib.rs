@@ -25,7 +25,8 @@ pub use endpoint::Endpoint;
 mod lifecycle;
 mod observability;
 pub use graph::{
-    GraphBuildError, GraphBuilder, GraphMetadata, NodeKind, NodeMetadata, RouteMetadata,
+    BackendCapacityMetadata, GraphBuildError, GraphBuilder, GraphMetadata, NodeKind, NodeMetadata,
+    RouteMetadata,
 };
 use lifecycle::Admission;
 pub use lifecycle::{AdmissionError, DrainError};

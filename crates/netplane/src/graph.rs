@@ -11,65 +11,8 @@ use tower::{BoxError, Service, ServiceExt, service_fn, util::BoxService};
 
 use crate::{Capacity, ConfigError, Endpoint, GraphVersion};
 
-/// The supported kind of a declared node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NodeKind {
-    /// A Tower service executed by a bounded endpoint.
-    Service,
-    /// A request selector with declared routes and a fallback.
-    Router,
-}
-
-/// One named graph node.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NodeMetadata {
-    /// Unique node identifier.
-    pub name: String,
-    /// Node kind.
-    pub kind: NodeKind,
-}
-
-/// One declared route from a router to a service.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RouteMetadata {
-    /// Selector label.
-    pub label: String,
-    /// Target service name.
-    pub target: String,
-}
-
-/// Deterministic, read-only description of one graph version.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GraphMetadata {
-    /// Entry node name.
-    pub entry: String,
-    /// Nodes sorted by name.
-    pub nodes: Vec<NodeMetadata>,
-    /// Routes sorted by label.
-    pub routes: Vec<RouteMetadata>,
-    /// Explicit fallback target, if a router exists.
-    pub fallback: Option<String>,
-    /// Capacity of the outer version endpoint.
-    pub capacity: Capacity,
-    /// Capacity of each backend endpoint, if a router exists.
-    pub backend_capacity: Option<Capacity>,
-}
-
-impl GraphMetadata {
-    pub(crate) fn single_root(capacity: Capacity) -> Self {
-        Self {
-            entry: "root".into(),
-            nodes: vec![NodeMetadata {
-                name: "root".into(),
-                kind: NodeKind::Service,
-            }],
-            routes: Vec::new(),
-            fallback: None,
-            capacity,
-            backend_capacity: None,
-        }
-    }
-}
+mod metadata;
+pub use metadata::{BackendCapacityMetadata, GraphMetadata, NodeKind, NodeMetadata, RouteMetadata};
 
 /// A graph declaration failed structural or capacity validation.
 #[derive(Debug, Error)]
@@ -110,12 +53,16 @@ struct Router<Request> {
     fallback: Option<String>,
 }
 
+struct RegisteredService<Request, Response> {
+    service: BoxService<Request, Response, BoxError>,
+    capacity_override: Option<Capacity>,
+}
 /// Builds one router that selects among named, independently bounded Tower services.
 ///
 /// Register ordinary `ServiceBuilder` compositions as services to use middleware.
 /// Duplicate declarations are recorded and reported by [`Self::validate`].
 pub struct GraphBuilder<Request, Response> {
-    services: BTreeMap<String, BoxService<Request, Response, BoxError>>,
+    services: BTreeMap<String, RegisteredService<Request, Response>>,
     router: Option<Router<Request>>,
     entry: Option<String>,
     capacity: Capacity,
@@ -132,7 +79,7 @@ impl<Request, Response> Default for GraphBuilder<Request, Response> {
 impl<Request, Response> GraphBuilder<Request, Response> {
     /// Create a builder with the same outer defaults as [`crate::GraphDraft`].
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         let capacity = Capacity {
             max_in_flight: 32,
             buffer_capacity: 64,
@@ -149,7 +96,45 @@ impl<Request, Response> GraphBuilder<Request, Response> {
 
     /// Register a named Tower service, including any already applied middleware.
     #[must_use]
-    pub fn service<S>(mut self, name: impl Into<String>, service: S) -> Self
+    pub fn service<S>(self, name: impl Into<String>, service: S) -> Self
+    where
+        Request: Send + 'static,
+        Response: Send + 'static,
+        S: Service<Request, Response = Response> + Send + 'static,
+        S::Error: Into<BoxError> + Send + Sync,
+        S::Future: Future<Output = Result<Response, S::Error>> + Send + 'static,
+    {
+        self.register_service(name, service, None)
+    }
+
+    /// Register a named Tower service with an explicit endpoint capacity.
+    ///
+    /// This override takes precedence over [`Self::backend_capacity`] regardless
+    /// of call order. Both capacities must be positive at validation. Backend
+    /// isolation requires an available outer execution slot.
+    #[must_use]
+    pub fn service_with_capacity<S>(
+        self,
+        name: impl Into<String>,
+        service: S,
+        capacity: Capacity,
+    ) -> Self
+    where
+        Request: Send + 'static,
+        Response: Send + 'static,
+        S: Service<Request, Response = Response> + Send + 'static,
+        S::Error: Into<BoxError> + Send + Sync,
+        S::Future: Future<Output = Result<Response, S::Error>> + Send + 'static,
+    {
+        self.register_service(name, service, Some(capacity))
+    }
+
+    fn register_service<S>(
+        mut self,
+        name: impl Into<String>,
+        service: S,
+        capacity_override: Option<Capacity>,
+    ) -> Self
     where
         Request: Send + 'static,
         Response: Send + 'static,
@@ -163,8 +148,13 @@ impl<Request, Response> GraphBuilder<Request, Response> {
             self.error
                 .get_or_insert(GraphBuildError::DuplicateNode(name));
         } else {
-            self.services
-                .insert(name, BoxService::new(service.map_err(Into::into)));
+            self.services.insert(
+                name,
+                RegisteredService {
+                    service: BoxService::new(service.map_err(Into::into)),
+                    capacity_override,
+                },
+            );
         }
         self
     }
@@ -266,7 +256,9 @@ impl<Request, Response> GraphBuilder<Request, Response> {
         self
     }
 
-    /// Set the capacity used by each independently owned backend.
+    /// Set the default capacity for backends without an explicit override.
+    ///
+    /// The declared default is validated even if every backend has an override.
     #[must_use]
     pub const fn backend_capacity(mut self, capacity: Capacity) -> Self {
         self.backend_capacity = capacity;
@@ -307,25 +299,26 @@ where
         if let Some(error) = self.error {
             return Err(error);
         }
-        let entry = self.entry.ok_or(GraphBuildError::MissingEntry)?;
+        let entry = self.entry.clone().ok_or(GraphBuildError::MissingEntry)?;
+        let metadata = {
+            let router = self
+                .router
+                .as_ref()
+                .ok_or_else(|| GraphBuildError::UnknownEntry(entry.clone()))?;
+            if entry != router.name {
+                return Err(GraphBuildError::UnknownEntry(entry));
+            }
+            let fallback = router
+                .fallback
+                .as_deref()
+                .ok_or(GraphBuildError::MissingFallback)?;
+            self.validate_capacities_and_targets(router, fallback)?;
+            self.metadata(router, entry.clone(), fallback)
+        };
         let router = self
             .router
             .ok_or_else(|| GraphBuildError::UnknownEntry(entry.clone()))?;
-        if entry != router.name {
-            return Err(GraphBuildError::UnknownEntry(entry));
-        }
         let fallback = router.fallback.ok_or(GraphBuildError::MissingFallback)?;
-        if self.capacity.max_in_flight == 0 || self.backend_capacity.max_in_flight == 0 {
-            return Err(ConfigError::ZeroConcurrency.into());
-        }
-        if self.capacity.buffer_capacity == 0 || self.backend_capacity.buffer_capacity == 0 {
-            return Err(ConfigError::ZeroBuffer.into());
-        }
-        for target in router.routes.values().chain(std::iter::once(&fallback)) {
-            if !self.services.contains_key(target) {
-                return Err(GraphBuildError::UnknownTarget(target.clone()));
-            }
-        }
         let reachable: BTreeSet<_> = router
             .routes
             .values()
@@ -336,36 +329,14 @@ where
                 "unreachable service {name}"
             )));
         }
-        let mut nodes: Vec<_> = std::iter::once(NodeMetadata {
-            name: router.name,
-            kind: NodeKind::Router,
-        })
-        .chain(self.services.keys().cloned().map(|name| NodeMetadata {
-            name,
-            kind: NodeKind::Service,
-        }))
-        .collect();
-        nodes.sort_by(|a, b| a.name.cmp(&b.name));
-        let metadata = GraphMetadata {
-            entry,
-            nodes,
-            routes: router
-                .routes
-                .iter()
-                .map(|(label, target)| RouteMetadata {
-                    label: label.clone(),
-                    target: target.clone(),
-                })
-                .collect(),
-            fallback: Some(fallback.clone()),
-            capacity: self.capacity,
-            backend_capacity: Some(self.backend_capacity),
-        };
         let endpoints: BTreeMap<_, _> = self
             .services
             .into_iter()
-            .map(|(name, service)| {
-                Endpoint::new(service, self.backend_capacity).map(|endpoint| (name, endpoint))
+            .map(|(name, registered)| {
+                let capacity = registered
+                    .capacity_override
+                    .unwrap_or(self.backend_capacity);
+                Endpoint::new(registered.service, capacity).map(|endpoint| (name, endpoint))
             })
             .collect::<Result<_, _>>()?;
         let resolved_routes: BTreeMap<_, _> = router
@@ -401,8 +372,80 @@ where
             metadata,
         })
     }
+
+    fn metadata(&self, router: &Router<Request>, entry: String, fallback: &str) -> GraphMetadata {
+        let mut nodes: Vec<_> = std::iter::once(NodeMetadata {
+            name: router.name.clone(),
+            kind: NodeKind::Router,
+        })
+        .chain(self.services.keys().cloned().map(|name| NodeMetadata {
+            name,
+            kind: NodeKind::Service,
+        }))
+        .collect();
+        nodes.sort_by(|a, b| a.name.cmp(&b.name));
+        GraphMetadata {
+            entry,
+            nodes,
+            routes: router
+                .routes
+                .iter()
+                .map(|(label, target)| RouteMetadata {
+                    label: label.clone(),
+                    target: target.clone(),
+                })
+                .collect(),
+            fallback: Some(fallback.into()),
+            capacity: self.capacity,
+            backend_capacity: Some(self.backend_capacity),
+            backend_capacities: self
+                .services
+                .iter()
+                .map(|(name, registered)| BackendCapacityMetadata {
+                    name: name.clone(),
+                    capacity: registered
+                        .capacity_override
+                        .unwrap_or(self.backend_capacity),
+                })
+                .collect(),
+        }
+    }
+
+    fn validate_capacities_and_targets(
+        &self,
+        router: &Router<Request>,
+        fallback: &str,
+    ) -> Result<(), GraphBuildError> {
+        validate_capacity(self.capacity)?;
+        validate_capacity(self.backend_capacity)?;
+        for registered in self.services.values() {
+            if let Some(capacity) = registered.capacity_override {
+                validate_capacity(capacity)?;
+            }
+        }
+        for target in router
+            .routes
+            .values()
+            .map(String::as_str)
+            .chain(std::iter::once(fallback))
+        {
+            if !self.services.contains_key(target) {
+                return Err(GraphBuildError::UnknownTarget(target.into()));
+            }
+        }
+        Ok(())
+    }
 }
 
+const fn validate_capacity(capacity: Capacity) -> Result<(), ConfigError> {
+    if capacity.max_in_flight == 0 {
+        return Err(ConfigError::ZeroConcurrency);
+    }
+    if capacity.buffer_capacity == 0 {
+        return Err(ConfigError::ZeroBuffer);
+    }
+    Ok(())
+}
 impl GraphBuildError {
     const fn kind(&self) -> &'static str {
         match self {

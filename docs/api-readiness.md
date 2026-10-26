@@ -1,12 +1,12 @@
 # Public API review
 
-This review covers the current `0.0.0` source surface. This documentation change keeps public signatures intact; no migration is required for existing source consumers. The external-consumer tests in `crates/netplane/tests/public_api.rs` and `crates/netplane-http/tests/public_api.rs` exercise the supported entry points from outside each library crate.
+This review covers the current `0.0.0` source surface. Existing builder calls remain valid. Adding `GraphMetadata::backend_capacities` is source-breaking for consumers constructing `GraphMetadata` with struct literals; those consumers must supply the new field. The external-consumer tests in `crates/netplane/tests/public_api.rs` and `crates/netplane-http/tests/public_api.rs` exercise the supported entry points from outside each library crate.
 
 | Area | Review outcome |
 | --- | --- |
 | `Capacity`, `RuntimeLimits` | Units are request counts. Both endpoint capacities and the global outstanding budget require positive values; defaults are 32 in flight and 64 buffered per endpoint. |
-| `GraphDraft`, `GraphBuilder` | The draft validates capacity and prepares one Tower root. The builder validates one named router with independently bounded backends, declared labels and an explicit fallback. Neither validates application policy or arbitrary topology. |
-| `GraphVersion`, `GraphMetadata` | Versions are immutable after validation. `metadata()` returns a shared read-only reference; controller snapshots clone the metadata and can be inspected independently. |
+| `GraphDraft`, `GraphBuilder` | The draft validates capacity and prepares one Tower root. The builder validates one named router with independently bounded backends, declared labels and an explicit fallback. `service_with_capacity` overrides the default backend capacity for its service, independent of call order. All declared capacities must be positive. Neither validates application policy or arbitrary topology. |
+| `GraphVersion`, `GraphMetadata` | Versions are immutable after validation. `metadata()` returns a shared read-only reference; controller snapshots clone the metadata and can be inspected independently. `backend_capacity` is the configured default; `backend_capacities` lists effective per-service capacities in name order and is empty for a single-root draft. |
 | `Handle` | Admission and version selection occur at method invocation, including for futures that are never polled. `try_execute` and `try_execute_until` return typed synchronous admission errors. `execute` and `execute_until` box those errors into the returned future. All four paths return service and worker errors as Tower `BoxError`. |
 | `Netplane` | Publication accepts validated versions and rejects after shutdown begins. Shutdown closes admission when called, drains accepted futures, and can be retried after a timeout. |
 | `ReconfigurationController` | Tokens are runtime-scoped and optimistic; stale and foreign tokens fail. Bounded history retains executable graph state, and rollback assigns a fresh publication ID. |

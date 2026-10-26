@@ -232,3 +232,98 @@ async fn backend_failure_does_not_reroute_and_releases_admission() -> Result<(),
     assert_eq!(b_calls.load(Ordering::SeqCst), 1);
     Ok(())
 }
+
+#[tokio::test]
+async fn backend_capacity_metadata_and_validation() -> Result<(), BoxError> {
+    let default = Capacity {
+        max_in_flight: 3,
+        buffer_capacity: 5,
+    };
+    let override_capacity = Capacity {
+        max_in_flight: 1,
+        buffer_capacity: 4,
+    };
+    for default_first in [true, false] {
+        let base = GraphBuilder::<Request, Response>::new();
+        let base = if default_first {
+            base.backend_capacity(default)
+        } else {
+            base
+        };
+        let base = base
+            .service_with_capacity("z", backend("z"), override_capacity)
+            .service("a", backend("a"));
+        let base = if default_first {
+            base
+        } else {
+            base.backend_capacity(default)
+        };
+        let graph = base
+            .router(
+                "dispatch",
+                |request: &Request| if *request == 0 { "z" } else { "a" },
+            )
+            .route("dispatch", "z", "z")
+            .fallback("dispatch", "a")
+            .entry("dispatch")
+            .validate()?;
+        assert_eq!(graph.metadata().backend_capacity, Some(default));
+        assert_eq!(
+            graph
+                .metadata()
+                .backend_capacities
+                .iter()
+                .map(|item| (item.name.as_str(), item.capacity))
+                .collect::<Vec<_>>(),
+            vec![("a", default), ("z", override_capacity)]
+        );
+    }
+    assert!(
+        matches!(builder().service_with_capacity("a", backend("again"), override_capacity).validate(), Err(GraphBuildError::DuplicateNode(name)) if name == "a")
+    );
+    assert!(matches!(
+        builder()
+            .service_with_capacity(
+                "late",
+                backend("late"),
+                Capacity {
+                    max_in_flight: 0,
+                    buffer_capacity: 1
+                }
+            )
+            .validate(),
+        Err(GraphBuildError::Capacity(ConfigError::ZeroConcurrency))
+    ));
+    assert!(matches!(
+        builder()
+            .service_with_capacity(
+                "late",
+                backend("late"),
+                Capacity {
+                    max_in_flight: 1,
+                    buffer_capacity: 0
+                }
+            )
+            .validate(),
+        Err(GraphBuildError::Capacity(ConfigError::ZeroBuffer))
+    ));
+    let only_override = GraphBuilder::new()
+        .service_with_capacity("a", backend("a"), override_capacity)
+        .router("dispatch", |_| "a")
+        .fallback("dispatch", "a")
+        .entry("dispatch")
+        .backend_capacity(Capacity {
+            max_in_flight: 0,
+            buffer_capacity: 1,
+        });
+    assert!(matches!(
+        only_override.validate(),
+        Err(GraphBuildError::Capacity(ConfigError::ZeroConcurrency))
+    ));
+    let draft = GraphDraft::new(backend("a")).validate()?;
+    assert!(draft.metadata().backend_capacities.is_empty());
+    Ok(())
+}
+
+#[path = "graph_builder/capacity_execution.rs"]
+mod capacity_execution;

@@ -105,7 +105,7 @@ fn runtime(
     let (polled, observed) = oneshot::channel();
     let b = Arc::clone(&calls_b);
     let graph = GraphBuilder::new()
-        .service(
+        .service_with_capacity(
             "a",
             GatedBackend {
                 state: Arc::clone(&state),
@@ -113,13 +113,21 @@ fn runtime(
                 calls: Arc::clone(&calls_a),
                 drops: Arc::clone(&drops_a),
             },
+            Capacity {
+                max_in_flight: 1,
+                buffer_capacity: 1,
+            },
         )
-        .service(
+        .service_with_capacity(
             "b",
             service_fn(move |_: usize| {
                 b.fetch_add(1, Ordering::SeqCst);
                 async { Ok::<_, Infallible>("B") }
             }),
+            Capacity {
+                max_in_flight: 8,
+                buffer_capacity: 8,
+            },
         )
         .router(
             "router",
