@@ -10,8 +10,8 @@ use std::{
 };
 
 use netplane::{
-    Capacity, ControllerError, ControllerOptions, GraphBuilder, GraphDraft, Netplane,
-    PublicationKind, ReconfigurationController, RuntimeLimits,
+    Capacity, ControllerError, ControllerOptions, GraphBuilder, GraphDraft, LifecycleState,
+    Netplane, PublicationKind, ReconfigurationController, RuntimeLimits,
 };
 use tokio::sync::Barrier;
 use tower::service_fn;
@@ -48,10 +48,12 @@ async fn replacement_rollback_and_bounded_history() -> TestResult {
     let handle = control.handle();
     let original = control.inspect().active.ok_or("missing original")?.id;
     let selected = handle.try_execute(0)?;
+    assert_eq!(handle.status().outstanding, 1);
     let first =
         control.publish_if_current(control.current_token().ok_or("missing token")?, graph(2)?)?;
     assert_eq!(first.previous, original);
     assert_eq!(selected.await?, 1);
+    assert_eq!(handle.status().outstanding, 0);
     assert_eq!(handle.execute(0).await?, 2);
     let second =
         control.publish_if_current(control.current_token().ok_or("missing token")?, graph(3)?)?;
@@ -63,6 +65,7 @@ async fn replacement_rollback_and_bounded_history() -> TestResult {
         PublicationKind::Rollback { source: original }
     );
     assert_eq!(handle.execute(0).await?, 1);
+    assert_eq!(handle.status().outstanding, 0);
     let snapshot = control.inspect();
     assert_eq!(
         snapshot.active.ok_or("missing active")?.id,
@@ -191,6 +194,9 @@ async fn invalid_candidate_and_shutdown_without_poll() -> TestResult {
     control.publish_if_current(token, graph(2)?)?;
     let held = control.handle().try_execute(0)?;
     let drain = control.shutdown(Duration::ZERO);
+    let retained = control.handle();
+    assert_eq!(retained.status().lifecycle, LifecycleState::Draining);
+    assert_eq!(retained.status().outstanding, 1);
     assert!(control.current_token().is_none());
     assert!(control.inspect().retained.is_empty());
     assert_eq!(
@@ -204,7 +210,10 @@ async fn invalid_candidate_and_shutdown_without_poll() -> TestResult {
     assert!(control.handle().try_execute(0).is_err());
     assert!(drain.await.is_err());
     drop(held);
+    assert_eq!(retained.status().outstanding, 0);
+    assert_eq!(retained.status().lifecycle, LifecycleState::Draining);
     control.shutdown(Duration::from_secs(1)).await?;
+    assert_eq!(retained.status().lifecycle, LifecycleState::Stopped);
     assert!(control.inspect().active.is_none());
     Ok(())
 }
@@ -233,12 +242,29 @@ async fn rollback_and_eviction_preserve_selected_worker_until_future_drop() -> T
     );
     let original = control.inspect().active.ok_or("missing active")?.id;
     control.publish_if_current(control.current_token().ok_or("missing token")?, graph(2)?)?;
-    control.rollback_if_current(control.current_token().ok_or("missing token")?, original)?;
-    let selected = control.handle().execute(0);
+    let rollback =
+        control.rollback_if_current(control.current_token().ok_or("missing token")?, original)?;
+    let selected_publication = rollback.published;
+    let handle = control.handle();
+    let selected = handle.execute(0);
+    assert_eq!(handle.status().outstanding, 1);
     control.publish_if_current(control.current_token().ok_or("missing token")?, graph(3)?)?;
     control.publish_if_current(control.current_token().ok_or("missing token")?, graph(4)?)?;
+    let snapshot = control.inspect();
+    assert_ne!(
+        snapshot.active.ok_or("missing active")?.id,
+        selected_publication
+    );
+    assert!(
+        snapshot
+            .retained
+            .iter()
+            .all(|v| v.id != selected_publication)
+    );
+    assert_eq!(handle.status().outstanding, 1);
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     assert_eq!(selected.await?, 0);
+    assert_eq!(handle.status().outstanding, 0);
     tokio::time::timeout(Duration::from_secs(1), async {
         while drops.load(Ordering::SeqCst) == 0 {
             tokio::task::yield_now().await;
@@ -289,12 +315,15 @@ async fn rollback_preserves_inflight_request_and_shared_service_state() -> TestR
     let original_id = control.inspect().active.ok_or("missing active")?.id;
     assert_eq!(control.handle().execute(0).await?, 1);
     let held = control.handle().try_execute(0)?;
+    assert_eq!(control.handle().status().outstanding, 1);
     control.publish_if_current(control.inspect().token.ok_or("missing token")?, graph(20)?)?;
     let first_rollback = control
         .rollback_if_current(control.inspect().token.ok_or("missing token")?, original_id)?;
     assert_eq!(control.handle().execute(0).await?, 2);
+    assert_eq!(control.handle().status().outstanding, 1);
     control.publish_if_current(control.inspect().token.ok_or("missing token")?, graph(30)?)?;
     assert_eq!(held.await?, 3);
+    assert_eq!(control.handle().status().outstanding, 0);
     assert_eq!(control.handle().execute(0).await?, 30);
     let second_rollback = control.rollback_if_current(
         control.inspect().token.ok_or("missing token")?,

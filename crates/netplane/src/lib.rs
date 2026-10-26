@@ -29,7 +29,7 @@ pub use graph::{
     RouteMetadata,
 };
 use lifecycle::Admission;
-pub use lifecycle::{AdmissionError, DrainError};
+pub use lifecycle::{AdmissionError, DrainError, LifecycleState, RuntimeStatus};
 use observability::{trace_publication, trace_publish_rejection};
 use thiserror::Error;
 use tower::{BoxError, Service};

@@ -31,15 +31,31 @@ pub enum DrainError {
 }
 
 struct State {
-    phase: Phase,
+    phase: LifecycleState,
     outstanding: usize,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Phase {
+/// Admission and shutdown phase of a Netplane runtime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LifecycleState {
+    /// New requests may be admitted.
     Running,
+    /// Admission is closed while accepted request futures drain.
     Draining,
+    /// A successful drain has completed and the active publication was cleared.
     Stopped,
+}
+
+/// A read-only sample of runtime-global admission and lifecycle state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeStatus {
+    /// Accepted, unfinished request futures across all handles and versions,
+    /// including futures that have not been polled.
+    pub outstanding: usize,
+    /// Configured runtime-global admission limit.
+    pub max_outstanding: usize,
+    /// Lifecycle phase sampled with `outstanding` under one lock.
+    pub lifecycle: LifecycleState,
 }
 
 pub struct Admission {
@@ -53,7 +69,7 @@ impl Admission {
         let (changed, _) = watch::channel(0);
         Arc::new(Self {
             state: Mutex::new(State {
-                phase: Phase::Running,
+                phase: LifecycleState::Running,
                 outstanding: 0,
             }),
             max_outstanding,
@@ -66,7 +82,7 @@ impl Admission {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state.phase != Phase::Running {
+        if state.phase != LifecycleState::Running {
             return Err(AdmissionError::Closed);
         }
         if state.outstanding >= self.max_outstanding {
@@ -85,8 +101,8 @@ impl Admission {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state.phase == Phase::Running {
-            state.phase = Phase::Draining;
+        if state.phase == LifecycleState::Running {
+            state.phase = LifecycleState::Draining;
         }
         drop(state);
         self.changed.subscribe()
@@ -97,14 +113,26 @@ impl Admission {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .phase
-            == Phase::Running
+            == LifecycleState::Running
     }
 
     pub(crate) fn mark_stopped(&self) {
         self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .phase = Phase::Stopped;
+            .phase = LifecycleState::Stopped;
+    }
+
+    pub(crate) fn status(&self) -> RuntimeStatus {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        RuntimeStatus {
+            outstanding: state.outstanding,
+            max_outstanding: self.max_outstanding,
+            lifecycle: state.phase,
+        }
     }
 
     pub(crate) fn outstanding(&self) -> usize {

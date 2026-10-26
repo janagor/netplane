@@ -5,7 +5,7 @@ use std::{future::Future, sync::atomic::Ordering};
 use tower::BoxError;
 
 use crate::{
-    AdmissionError, DeadlineExceeded, Handle,
+    AdmissionError, DeadlineExceeded, Handle, RuntimeStatus,
     observability::{RequestObservation, observe},
 };
 
@@ -14,6 +14,17 @@ where
     Request: Send + 'static,
     Response: Send + 'static,
 {
+    /// Sample this runtime's admission count and lifecycle phase.
+    ///
+    /// `outstanding` includes accepted, unfinished Netplane request futures,
+    /// even before first poll, across every handle and publication. It does
+    /// not count pending HTTP body reads or work retained independently by a
+    /// Tower service. The count and phase come from one admission-state lock.
+    #[must_use]
+    pub fn status(&self) -> RuntimeStatus {
+        self.admission.status()
+    }
+
     /// Admit a request and select its version synchronously.
     ///
     /// The accepted future holds one global slot and its selected version until

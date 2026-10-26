@@ -40,8 +40,12 @@ async fn control_tracks_replacements_rollback_and_eviction() -> Result<(), BoxEr
     use crate::control::{ControlError, PolicyInput, ReconfigureRequest, RollbackRequest};
     let mut config = GatewayConfig::default();
     config.policy.canary_percent = 0;
+    let max_outstanding = config.runtime_limits.max_outstanding;
     let (control, drain_rx) = control_fixture(config)?;
     let initial = control.status().await?;
+    assert_eq!(initial.runtime.lifecycle, "running");
+    assert_eq!(initial.runtime.outstanding, 0);
+    assert_eq!(initial.runtime.max_outstanding, max_outstanding);
     assert_eq!(initial.active.as_ref().ok_or("missing active")?.version, 1);
     assert_eq!(
         initial
@@ -89,6 +93,7 @@ async fn control_tracks_replacements_rollback_and_eviction() -> Result<(), BoxEr
     control.reconfigure(request(3, 20)).await?;
     control.reconfigure(request(4, 30)).await?;
     let status = control.status().await?;
+    assert_eq!(status.runtime.outstanding, 0);
     assert_eq!(
         status
             .retained
@@ -134,6 +139,25 @@ async fn admin_authentication_and_json_errors() -> Result<(), BoxError> {
     assert_eq!(
         app.clone().oneshot(request(None, "{}")?).await?.status(),
         StatusCode::UNAUTHORIZED
+    );
+    let unauthenticated_status = Request::builder().uri("/status").body(Body::empty())?;
+    assert_eq!(
+        app.clone().oneshot(unauthenticated_status).await?.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let authenticated_status = Request::builder()
+        .uri("/status")
+        .header("authorization", "Bearer abcdefghijklmnop")
+        .body(Body::empty())?;
+    let response = app.clone().oneshot(authenticated_status).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 4096).await?;
+    let status: serde_json::Value = serde_json::from_slice(&body)?;
+    assert_eq!(status["runtime"]["lifecycle"], "running");
+    assert_eq!(status["runtime"]["outstanding"], 0);
+    assert_eq!(
+        status["runtime"]["max_outstanding"],
+        GatewayConfig::default().runtime_limits.max_outstanding
     );
     assert_eq!(
         app.clone()
@@ -282,6 +306,10 @@ async fn verify_live_flow(
             async move { wire_request(public_port, "POST", "/process", None, "held").await },
         );
     tokio::time::timeout(Duration::from_secs(3), gate.entered.notified()).await?;
+    let held_status = wire_request(admin_port, "GET", "/status", token, "").await?;
+    let held_view: serde_json::Value = serde_json::from_slice(held_status.body())?;
+    assert_eq!(held_view["runtime"]["lifecycle"], "running");
+    assert_eq!(held_view["runtime"]["outstanding"], 1);
     let replacement = wire_request(
         admin_port,
         "POST",
@@ -291,12 +319,27 @@ async fn verify_live_flow(
     )
     .await?;
     assert_eq!(replacement.status(), StatusCode::OK);
+    let published_status = wire_request(admin_port, "GET", "/status", token, "").await?;
+    let published_view: serde_json::Value = serde_json::from_slice(published_status.body())?;
+    assert_eq!(published_view["runtime"]["outstanding"], 1);
     assert_eq!(
         wire_request(public_port, "POST", "/process", None, "hello")
             .await?
             .headers()["x-backend"],
         "canary"
     );
+    let rollback = wire_request(
+        admin_port,
+        "POST",
+        "/rollback",
+        token,
+        r#"{"expected_version":2,"target_version":1}"#,
+    )
+    .await?;
+    assert_eq!(rollback.status(), StatusCode::OK);
+    let rolled_status = wire_request(admin_port, "GET", "/status", token, "").await?;
+    let rolled_view: serde_json::Value = serde_json::from_slice(rolled_status.body())?;
+    assert_eq!(rolled_view["runtime"]["outstanding"], 1);
     gate.release.notify_one();
     let held_response = held.await??;
     assert_eq!(held_response.headers()["x-backend"], "stable");
@@ -314,15 +357,6 @@ async fn verify_live_flow(
         .status(),
         StatusCode::CONFLICT
     );
-    let rollback = wire_request(
-        admin_port,
-        "POST",
-        "/rollback",
-        token,
-        r#"{"expected_version":2,"target_version":1}"#,
-    )
-    .await?;
-    assert_eq!(rollback.status(), StatusCode::OK);
     let restored = wire_request(public_port, "POST", "/process", None, "hello").await?;
     assert_eq!(restored.headers()["x-backend"], "stable");
     assert_eq!(restored.headers()["x-service-count"], "3");
@@ -330,6 +364,8 @@ async fn verify_live_flow(
     let value: serde_json::Value = serde_json::from_slice(status.body())?;
     assert_eq!(value["active"]["version"], 3);
     assert_eq!(value["last_publication"]["source_version"], 1);
+    assert_eq!(value["runtime"]["outstanding"], 0);
+    assert_eq!(value["runtime"]["lifecycle"], "running");
     assert_eq!(
         wire_request(admin_port, "POST", "/shutdown", token, "")
             .await?
@@ -386,6 +422,8 @@ async fn completed_shutdown_has_null_active_status() -> Result<(), BoxError> {
     assert!(status.active.is_none());
     assert!(status.retained.is_empty());
     assert_eq!(status.retained_count, 0);
+    assert_eq!(status.runtime.lifecycle, "stopped");
+    assert_eq!(status.runtime.outstanding, 0);
     Ok(())
 }
 

@@ -2,6 +2,16 @@
 
 Netplane emits structured `tracing` events with target `netplane`. The library does not install a subscriber. Applications can enable events with `netplane=debug`.
 
+## Read-only status
+
+Any `Handle` clone can call `status()` to sample `RuntimeStatus`. Its `outstanding` field counts accepted, unfinished Netplane request futures across all handles and publications, including futures that have not been polled. `max_outstanding` is the configured global admission limit. `lifecycle` is `Running`, `Draining`, or `Stopped`. The count and lifecycle phase are copied under one admission-state lock. Reading status does not affect admission or draining and emits no event.
+
+Shutdown changes the phase to `Draining` when called, before its drain future is polled. A timed-out drain leaves that phase in place even after the last request is released. A successful drain changes it to `Stopped`. The count does not include pending HTTP body reads or work independently retained by a Tower service after its Netplane future is dropped.
+
+`ReconfigurationController::inspect()` separately samples publication history. Its retained count is the number of entries available for rollback, not a count of live executable graphs or services. Evicted publications can remain owned by accepted requests, and rollback can make several publications share one executable graph. A gateway `/status` response combines these two samples; concurrent operations can occur between them. The HTTP listener may stop before core draining finishes, so use a retained handle to inspect lifecycle during shutdown.
+
+## Tracing events
+
 `runtime_id` identifies a runtime within one process. `version_id` is a publication generation within that runtime, starting at 1. `request_id` is allocated on admission and shared by cloned handles. Correlate requests with `(runtime_id, request_id)` and publications with `(runtime_id, version_id)`. Identifiers are process local.
 
 | Event | Level | Fields | Meaning |

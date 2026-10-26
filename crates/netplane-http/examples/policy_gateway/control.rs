@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use netplane::{
-    ControllerError, ControllerSnapshot, PublicationKind, ReconfigurationController,
-    ReconfigurationOutcome,
+    ControllerError, ControllerSnapshot, LifecycleState, PublicationKind,
+    ReconfigurationController, ReconfigurationOutcome,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, oneshot};
@@ -76,6 +76,14 @@ pub struct StatusView {
     pub retained: Vec<VersionView>,
     pub retained_count: usize,
     pub last_publication: Option<OutcomeView>,
+    pub runtime: RuntimeView,
+}
+
+#[derive(Serialize)]
+pub struct RuntimeView {
+    pub lifecycle: &'static str,
+    pub outstanding: usize,
+    pub max_outstanding: usize,
 }
 
 #[derive(Debug)]
@@ -149,6 +157,7 @@ impl GatewayControl {
     pub async fn status(&self) -> Result<StatusView, ControlError> {
         let state = self.state.lock().await;
         let snapshot = self.controller.inspect();
+        let runtime = self.controller.handle().status();
         let view = |id: u64| -> Result<VersionView, ControlError> {
             let policy = state.policies.get(&id).ok_or(ControlError::Internal)?;
             Ok(VersionView {
@@ -173,6 +182,15 @@ impl GatewayControl {
             retained_count: retained.len(),
             retained,
             last_publication: snapshot.last_outcome.map(Into::into),
+            runtime: RuntimeView {
+                lifecycle: match runtime.lifecycle {
+                    LifecycleState::Running => "running",
+                    LifecycleState::Draining => "draining",
+                    LifecycleState::Stopped => "stopped",
+                },
+                outstanding: runtime.outstanding,
+                max_outstanding: runtime.max_outstanding,
+            },
         })
     }
 
