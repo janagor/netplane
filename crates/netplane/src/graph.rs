@@ -12,7 +12,9 @@ use tower::{BoxError, Service, ServiceExt, service_fn, util::BoxService};
 use crate::{Capacity, ConfigError, Endpoint, ExecutionGraph, GraphVersion};
 
 mod metadata;
+mod validation;
 pub use metadata::{BackendCapacityMetadata, GraphMetadata, NodeKind, NodeMetadata, RouteMetadata};
+use validation::validate_capacity;
 
 /// A graph declaration failed structural or capacity validation.
 #[derive(Debug, Error)]
@@ -472,31 +474,5 @@ where
             }
         }
         Ok(())
-    }
-}
-
-const fn validate_capacity(capacity: Capacity) -> Result<(), ConfigError> {
-    if capacity.max_in_flight == 0 {
-        return Err(ConfigError::ZeroConcurrency);
-    }
-    if capacity.buffer_capacity == 0 {
-        return Err(ConfigError::ZeroBuffer);
-    }
-    Ok(())
-}
-impl GraphBuildError {
-    const fn kind(&self) -> &'static str {
-        match self {
-            Self::MissingEntry => "missing_entry",
-            Self::DuplicateNode(_) => "duplicate_node",
-            Self::UnknownEntry(_) => "unknown_entry",
-            Self::UnknownTarget(_) => "unknown_target",
-            Self::DuplicateRoute(_) => "duplicate_route",
-            Self::DuplicateFallback(_) => "duplicate_fallback",
-            Self::MissingFallback => "missing_fallback",
-            Self::UnsupportedTopology(_) => "unsupported_topology",
-            Self::Capacity(error) => crate::config_error_kind(error),
-            Self::ConflictingOuterCapacity => "conflicting_outer_capacity",
-        }
     }
 }
