@@ -13,10 +13,17 @@ pub type ProbeError = Box<dyn Error + Send + Sync>;
 pub type CallFuture = Pin<Box<dyn Future<Output = Result<u64, ProbeError>> + Send>>;
 pub type Call = Arc<dyn Fn(u64) -> CallFuture + Send + Sync>;
 
-const fn capacity(config: &Config) -> Capacity {
+const fn outer_capacity(config: &Config) -> Capacity {
     Capacity {
         max_in_flight: config.max_in_flight,
         buffer_capacity: config.buffer_capacity,
+    }
+}
+
+const fn backend_capacity(config: &Config) -> Capacity {
+    Capacity {
+        max_in_flight: config.backend_in_flight,
+        buffer_capacity: config.backend_buffer,
     }
 }
 
@@ -70,14 +77,14 @@ fn tower_double_buffered(config: &Config) -> Call {
     let routes = config.routes;
     let workload = config.workload;
     let work_us = config.work_us;
-    let buffer_capacity = config.buffer_capacity;
-    let max_in_flight = config.max_in_flight;
+    let outer = outer_capacity(config);
+    let backend = backend_capacity(config);
     let backends: Arc<Vec<_>> = Arc::new(
         (0..routes)
             .map(|_| {
                 ServiceBuilder::new()
-                    .buffer(buffer_capacity)
-                    .concurrency_limit(max_in_flight)
+                    .buffer(backend.buffer_capacity)
+                    .concurrency_limit(backend.max_in_flight)
                     .service(service(workload, work_us))
             })
             .collect(),
@@ -87,8 +94,8 @@ fn tower_double_buffered(config: &Config) -> Call {
         async move { backend.ready().await?.call(request).await }
     });
     let outer = ServiceBuilder::new()
-        .buffer(buffer_capacity)
-        .concurrency_limit(max_in_flight)
+        .buffer(outer.buffer_capacity)
+        .concurrency_limit(outer.max_in_flight)
         .service(selector);
     let permits = Arc::new(Semaphore::new(config.max_outstanding));
     let inner: Call = Arc::new(move |request| {
@@ -105,13 +112,23 @@ fn graph_builder(config: &Config) -> Result<Call, ProbeError> {
     let routes = config.routes;
     let workload = config.workload;
     let work_us = config.work_us;
+    let skew_percent = config.skew_percent;
     let mut builder = GraphBuilder::new()
         .router("router", move |value: &u64| {
-            Cow::Owned(format!("route-{}", value % routes as u64))
+            let route = if (*value % 100) < u64::from(skew_percent) {
+                0
+            } else {
+                *value % routes as u64
+            };
+            Cow::Owned(format!("route-{route}"))
         })
         .entry("router")
-        .capacity(capacity(config))
-        .backend_capacity(capacity(config));
+        .backend_capacity(backend_capacity(config));
+    builder = if config.implementation == Implementation::BackendOnly {
+        builder.without_outer_capacity()
+    } else {
+        builder.capacity(outer_capacity(config))
+    };
     for index in 0..routes {
         let name = format!("backend-{index}");
         builder = builder
@@ -131,7 +148,7 @@ fn graph_draft(config: &Config) -> Result<Call, ProbeError> {
     // GraphDraft has no router; compare the one-handoff Netplane path itself.
     let runtime = Netplane::new(
         GraphDraft::new(service(config.workload, config.work_us))
-            .capacity(capacity(config))
+            .capacity(outer_capacity(config))
             .validate()?,
         RuntimeLimits {
             max_outstanding: config.max_outstanding,
@@ -165,10 +182,10 @@ fn single_handoff(config: &Config) -> Result<Call, ProbeError> {
     let routes = config.routes;
     let workload = config.workload;
     let work_us = config.work_us;
-    let backend_capacity = capacity(config);
+    let capacity = backend_capacity(config);
     let backends: Arc<Vec<_>> = Arc::new(
         (0..routes)
-            .map(|_| Endpoint::new(service(workload, work_us), backend_capacity))
+            .map(|_| Endpoint::new(service(workload, work_us), capacity))
             .collect::<Result<Vec<_>, _>>()?,
     );
     let permits = Arc::new(Semaphore::new(config.max_outstanding));
@@ -188,7 +205,7 @@ pub fn build(config: &Config) -> Result<Call, ProbeError> {
     match config.implementation {
         Implementation::TowerBounded => Ok(tower_bounded(config)),
         Implementation::TowerDoubleBuffered => Ok(tower_double_buffered(config)),
-        Implementation::GraphBuilder => graph_builder(config),
+        Implementation::GraphBuilder | Implementation::BackendOnly => graph_builder(config),
         Implementation::SingleHandoff => single_handoff(config),
         Implementation::GraphDraft => graph_draft(config),
     }

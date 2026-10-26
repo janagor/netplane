@@ -1,11 +1,9 @@
 //! Paired comparison probe for the single-handoff router experiment.
 //!
-//! Compares five in-memory topologies without changing production Netplane:
-//! bounded Tower, double-buffered Tower, `GraphBuilder`, experimental
-//! single-handoff endpoints, and `GraphDraft`.
+//! Compares production buffered and backend-only `GraphBuilder` policies with
+//! Tower, `GraphDraft`, and the earlier single-handoff fixture.
 //!
-//! Outer `GraphBuilder` capacity is not reproduced by the single-handoff fixture.
-//! See `docs/single-handoff-prototype.md`.
+//! See `docs/architecture/routed-execution.md` for capacity differences.
 
 mod config;
 mod fixtures;
@@ -49,7 +47,7 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn environment() -> Environment {
+fn environment(tokio_workers: usize) -> Environment {
     let cpu_model = std::fs::read_to_string("/proc/cpuinfo")
         .ok()
         .and_then(|text| {
@@ -71,7 +69,7 @@ fn environment() -> Environment {
             .unwrap_or_else(|| std::env::consts::ARCH.to_owned()),
         os: std::env::consts::OS.to_owned(),
         cpu_model,
-        tokio_workers: 4,
+        tokio_workers,
     }
 }
 
@@ -79,7 +77,7 @@ fn main() -> Result<(), ProbeError> {
     let config = Cli::parse().validate()?;
     let output = config.output.clone();
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
+        .worker_threads(config.tokio_workers)
         .enable_all()
         .build()?;
     let report = runtime.block_on(async {
@@ -87,11 +85,11 @@ fn main() -> Result<(), ProbeError> {
         measure::warm(&call, config.warmup).await?;
         let metrics = measure::measure(&config, &call).await?;
         Ok::<_, ProbeError>(Report {
-            schema_version: 2,
+            schema_version: 3,
             experiment: "single_handoff_router",
+            environment: environment(config.tokio_workers),
             config,
-            environment: environment(),
-            capacity_notes: "single_handoff preserves backend Endpoint bounds and a non-blocking max_outstanding semaphore; it does not enforce GraphBuilder outer max_in_flight or buffer_capacity",
+            capacity_notes: "graph_builder is double-buffered; backend_only and single_handoff omit aggregate per-version capacity while preserving backend and global outstanding limits",
             metrics,
         })
     })?;
