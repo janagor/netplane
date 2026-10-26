@@ -48,7 +48,11 @@
             packages = with pkgs; [
               rustToolchain
               cargo-nextest
+              cargo-audit
+              cargo-machete
               mdbook
+              shellcheck
+              markdownlint-cli2
             ];
 
             env = {
