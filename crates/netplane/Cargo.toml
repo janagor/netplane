@@ -57,3 +57,7 @@ harness = false
 [[example]]
 name = "operational_probe"
 path = "examples/operational_probe/main.rs"
+
+[[example]]
+name = "single_handoff_probe"
+path = "examples/single_handoff_probe/main.rs"

@@ -11,7 +11,9 @@ use std::{
     sync::Arc,
 };
 
-use netplane::{Capacity, GraphBuilder, GraphDraft, GraphVersion, Netplane, RuntimeLimits};
+use netplane::{
+    Capacity, Endpoint, GraphBuilder, GraphDraft, GraphVersion, Netplane, RuntimeLimits,
+};
 use tower::{Service, ServiceBuilder, ServiceExt, service_fn};
 
 /// Default endpoint capacity for the zero-delay fixtures.
@@ -161,6 +163,81 @@ pub fn tower_double_buffered_router(
         .buffer(CAPACITY.buffer_capacity)
         .concurrency_limit(CAPACITY.max_in_flight)
         .service(selector)
+}
+
+/// Build a Tower router with one buffer handoff per request.
+///
+/// Backends keep independent buffer and concurrency limits. The selector runs
+/// in the caller task and submits directly to the chosen backend, so there is
+/// no outer buffer worker. Outer `max_in_flight` / `buffer_capacity` semantics
+/// from [`GraphBuilder`] are intentionally not reproduced here.
+///
+/// # Panics
+/// Panics if `routes` is zero.
+#[must_use]
+pub fn tower_single_buffered_router(
+    routes: usize,
+) -> impl Service<u64, Response = u64, Error = tower::BoxError> + Clone + Send + 'static {
+    assert!(routes > 0);
+    let backends: Arc<Vec<_>> = Arc::new(
+        (0..routes)
+            .map(|_| {
+                ServiceBuilder::new()
+                    .buffer(CAPACITY.buffer_capacity)
+                    .concurrency_limit(CAPACITY.max_in_flight)
+                    .service(service())
+            })
+            .collect(),
+    );
+    service_fn(move |request: u64| {
+        let mut backend = backends[usize::try_from(request).unwrap_or(0) % routes].clone();
+        async move { backend.ready().await?.call(request).await }
+    })
+}
+
+/// Experimental Netplane-endpoint single-handoff router.
+///
+/// Reuses backend [`Endpoint`]s and routes directly into
+/// [`Endpoint::execute`](netplane::Endpoint::execute). There is no outer
+/// `Endpoint::new` and therefore no second Tower buffer worker.
+///
+/// Outer capacity is **not** equivalent to production [`GraphBuilder`]: this
+/// fixture only preserves backend bounds. Callers that need a stand-in for the
+/// outer `max_in_flight` limit should apply their own semaphore outside the
+/// timed path, and must not treat that as Tower buffer queue semantics.
+///
+/// # Panics
+/// Panics if `routes` is zero or endpoint construction fails.
+#[must_use]
+pub fn single_handoff_endpoints(routes: usize) -> SingleHandoffRouter {
+    assert!(routes > 0);
+    let backends: Vec<_> = (0..routes)
+        .map(|_| Endpoint::new(service(), CAPACITY).unwrap())
+        .collect();
+    SingleHandoffRouter {
+        backends: Arc::new(backends),
+    }
+}
+
+/// Cloneable router over independently bounded backend endpoints.
+#[derive(Clone)]
+pub struct SingleHandoffRouter {
+    backends: Arc<Vec<Endpoint<u64, u64>>>,
+}
+
+impl SingleHandoffRouter {
+    /// Select a backend and submit through its single buffer worker.
+    ///
+    /// # Errors
+    /// Returns a service or buffer worker error from the selected endpoint.
+    pub fn execute(
+        &self,
+        request: u64,
+    ) -> impl std::future::Future<Output = Result<u64, tower::BoxError>> + Send + 'static {
+        let routes = self.backends.len();
+        let endpoint = self.backends[usize::try_from(request).unwrap_or(0) % routes].clone();
+        endpoint.execute(request)
+    }
 }
 
 /// Build a label-to-index map matching the `GraphBuilder` route table shape.

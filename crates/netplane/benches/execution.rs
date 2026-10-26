@@ -137,6 +137,42 @@ fn execution(c: &mut Criterion) {
     group.finish();
 }
 
+/// One-handoff experimental fixtures, kept in the same Criterion group name.
+fn execution_single_handoff(c: &mut Criterion) {
+    let runtime = common::runtime();
+    let mut tower_single = runtime.block_on(async { common::tower_single_buffered_router(1) });
+    let single_handoff = runtime.block_on(async { common::single_handoff_endpoints(1) });
+    runtime.block_on(warm_tower(&mut tower_single));
+    runtime.block_on(async {
+        for value in 0..100 {
+            assert_eq!(single_handoff.execute(value).await.unwrap(), value + 1);
+        }
+    });
+    let mut group = c.benchmark_group("execution/serial");
+    group.bench_function("tower_single_buffered_one_route", |b| {
+        b.to_async(&runtime).iter(|| {
+            let mut tower_single = tower_single.clone();
+            async move {
+                let value = tower_single
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(black_box(7))
+                    .await
+                    .unwrap();
+                assert_eq!(black_box(value), 8);
+            }
+        })
+    });
+    group.bench_function("single_handoff_one_route", |b| {
+        b.to_async(&runtime).iter(|| async {
+            let value = single_handoff.execute(black_box(7)).await.unwrap();
+            assert_eq!(black_box(value), 8);
+        })
+    });
+    group.finish();
+}
+
 fn admission(c: &mut Criterion) {
     let runtime = common::runtime();
     let graph = runtime.block_on(async { common::netplane(256) });
@@ -186,5 +222,5 @@ fn admission(c: &mut Criterion) {
     admission.finish();
 }
 
-criterion_group!(benches, execution, admission);
+criterion_group!(benches, execution, execution_single_handoff, admission);
 criterion_main!(benches);
