@@ -1,6 +1,6 @@
 # Netplane
 
-The optional `netplane-http` workspace crate serves buffered HTTP requests through a Netplane handle. It bounds body size, body read concurrency, and read time, then rejects oversized encoded responses. See `crates/netplane-http/examples/reconfigure.rs` for a persistent listener with process-local graph publication.
+The optional `netplane-http` workspace crate serves buffered HTTP requests through a Netplane handle. It bounds body size, body read concurrency, and read time, then rejects oversized encoded responses. See [HTTP resource boundaries](docs/http-boundaries.md) and `crates/netplane-http/examples/reconfigure.rs` for a persistent listener with process-local graph publication.
 
 The [policy routing gateway](crates/netplane-http/examples/policy_gateway/README.md) is a persistent HTTP example with deterministic stable/canary routing, bounded execution, and graceful shutdown.
 

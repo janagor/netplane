@@ -38,6 +38,7 @@
 - [AGENTS.md](AGENTS.md): Coding contract and runtime invariants.
 - [docs/architecture.md](docs/architecture.md): Architecture and current limits.
 - [docs/architecture/execution-semantics.md](docs/architecture/execution-semantics.md): Canonical runtime behavior contract.
+- [docs/http-boundaries.md](docs/http-boundaries.md): HTTP ingress, admission, response, and transport resource boundaries.
 - [docs/adr/](docs/adr/): Accepted architectural decisions.
 
 ## Verification
@@ -50,7 +51,7 @@ Run cargo fmt --all -- --check, cargo clippy --workspace --all-targets --all-fea
 
 # Netplane
 
-The optional `netplane-http` workspace crate serves buffered HTTP requests through a Netplane handle. It bounds body size, body read concurrency, and read time, then rejects oversized encoded responses. See `crates/netplane-http/examples/reconfigure.rs` for a persistent listener with process-local graph publication.
+The optional `netplane-http` workspace crate serves buffered HTTP requests through a Netplane handle. It bounds body size, body read concurrency, and read time, then rejects oversized encoded responses. See [HTTP resource boundaries](docs/http-boundaries.md) and `crates/netplane-http/examples/reconfigure.rs` for a persistent listener with process-local graph publication.
 
 The [policy routing gateway](crates/netplane-http/examples/policy_gateway/README.md) is a persistent HTTP example with deterministic stable/canary routing, bounded execution, and graceful shutdown.
 
@@ -268,6 +269,44 @@ The runtime emits [structured tracing events](../observability.md) for admission
 `Handle::status()` returns a read-only `RuntimeStatus` sampled from one admission-state lock. Its count includes all accepted, unfinished Netplane futures across handles and versions; its lifecycle is `Running`, `Draining`, or `Stopped`. Calling shutdown enters `Draining` synchronously. Timeout leaves that phase in place, and only a successful drain enters `Stopped`. This sample and `ReconfigurationController::inspect()` are independent observations and need not reflect the same instant. Controller history length counts retained publication entries, not live executable graphs or services. The gateway's `/status` endpoint includes both views while its listener remains available.
 
 `version.released` means a publication wrapper lost its last owner. A rollback can make two publication IDs share one executable graph, so this event alone does not prove that its Tower workers were destroyed. Arbitrary graph construction and policy validation remain future work.
+
+For buffering, admission timing, response ownership, and listener shutdown at the HTTP boundary, see [HTTP resource boundaries](../http-boundaries.md).
+
+## Source: docs/http-boundaries.md
+
+> Relative links in this section resolve from docs.
+
+# HTTP resource boundaries
+
+`netplane-http` buffers a request body before decoding and calling `Handle::try_execute()`. Axum and Hyper parse headers before the adapter runs. The body-read semaphore is shared by clones of one adapter, uses immediate rejection when full, and does not count open sockets. The body permit is released after decoding or when collection is canceled. A request selects its graph when `try_execute()` accepts it, so publication during an upload selects the newly active graph.
+
+| Resource | Owner | Boundary |
+| --- | --- | --- |
+| Buffered request body | Netplane HTTP | Per-request `max_body_bytes`; `Content-Length` can reject early, streamed bodies are checked while collecting. |
+| Concurrent body readers | Netplane HTTP | `max_concurrent_body_reads` counts body collection and decoding, not connections. Exhaustion immediately rejects. |
+| Body collection time | Netplane HTTP | `body_read_timeout` covers asynchronous collection after headers, not header parsing or synchronous decoder CPU time. |
+| Outstanding execution | Netplane core | Global admission starts after decoding and includes accepted, unfinished requests, even unpolled futures. |
+| Selected graph | Netplane core | Selected at `try_execute()`, retained through accepted execution or future drop. |
+| Encoded response size | Netplane HTTP | `max_response_bytes` is checked after encoding, including mapped service errors. It does not bound temporary encoder allocations. |
+| Slow response writer | HTTP transport | A response can retain its bytes after Netplane admission is released. Socket writes are outside the execution budget. |
+| Incomplete HTTP headers | HTTP transport | The adapter has not been called. Wire behavior is determined by Axum and Hyper. |
+| Open HTTP connections | HTTP transport | No connection-count limit is supplied by the adapter. Apply server-level policy where needed. |
+| Detached service work | Tower service | Dropping execution releases Netplane admission; service-owned work may continue according to that service's cancellation semantics. |
+
+| Adapter condition | HTTP status |
+| --- | --- |
+| Body-read permits exhausted | 503 |
+| Body too large | 413 |
+| Body collection timeout | 408 |
+| Failed body collection | 400 |
+| Request decoder failure | 400 |
+| Runtime admission exhausted or closed | 503 |
+| Response encoder failure | 500 |
+| Encoded response over limit | 500 |
+
+These are adapter-level mappings. Hyper may reject malformed requests before the adapter and produce a different wire response.
+
+`Netplane::shutdown()` closes core admission immediately and drains accepted executions. It does not cancel an upload that has not reached execution. `axum::serve(...).with_graceful_shutdown(...)` separately manages the listener and connections. The two shutdown deadlines are independent. A pending upload may finish after core shutdown and then receive 503 at admission; a stalled connection may require transport-level termination.
 
 ## Source: docs/adr/0001-tower-service-model.md
 

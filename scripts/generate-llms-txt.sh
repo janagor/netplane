@@ -13,6 +13,7 @@ SOURCES=(
     CONTRIBUTING.md
     docs/architecture.md
     docs/architecture/execution-semantics.md
+    docs/http-boundaries.md
     docs/adr/0001-tower-service-model.md
     docs/adr/0002-runtime-reconfiguration.md
     docs/adr/0003-crate-boundaries.md
@@ -62,6 +63,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - [AGENTS.md](AGENTS.md): Coding contract and runtime invariants.
 - [docs/architecture.md](docs/architecture.md): Architecture and current limits.
 - [docs/architecture/execution-semantics.md](docs/architecture/execution-semantics.md): Canonical runtime behavior contract.
+- [docs/http-boundaries.md](docs/http-boundaries.md): HTTP ingress, admission, response, and transport resource boundaries.
 - [docs/adr/](docs/adr/): Accepted architectural decisions.
 
 ## Verification
