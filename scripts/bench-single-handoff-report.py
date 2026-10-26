@@ -28,6 +28,8 @@ CELL_CONFIG_KEYS = (
     "work_us",
     "max_in_flight",
     "buffer_capacity",
+    "backend_in_flight",
+    "backend_buffer",
     "max_outstanding",
     "routes",
 )
