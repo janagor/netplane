@@ -16,6 +16,8 @@
   },
   "ignores": [
     "**/node_modules/**",
+    ".direnv/**",
+    "target/**",
     ".mimocode/**",
     ".claude/skills/**",
     ".qwen/skills/**",

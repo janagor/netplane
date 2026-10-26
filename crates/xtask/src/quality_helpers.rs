@@ -16,7 +16,11 @@ pub fn find_files(dir: &Path, ext: &str, files: &mut Vec<PathBuf>) {
             let path = entry.path();
             if path.is_dir() {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if name != "target" && name != ".git" && name != ".cargo" && name != "node_modules"
+                if name != "target"
+                    && name != ".git"
+                    && name != ".cargo"
+                    && name != ".direnv"
+                    && name != "node_modules"
                 {
                     find_files(&path, ext, files);
                 }
@@ -224,6 +228,9 @@ mod tests {
         std::fs::write(&source, "fn main() {}").unwrap();
         let other = nested.join("b.txt");
         std::fs::write(&other, "not rust").unwrap();
+        let ignored = temp.path().join(".direnv");
+        std::fs::create_dir_all(&ignored).unwrap();
+        std::fs::write(ignored.join("generated.rs"), "fn generated() {}").unwrap();
 
         let mut files = Vec::new();
         find_files(temp.path(), "rs", &mut files);
