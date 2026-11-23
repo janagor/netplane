@@ -14,6 +14,7 @@ SOURCES=(
     docs/architecture.md
     docs/architecture/execution-semantics.md
     docs/control-plane.md
+    docs/control-plane-observability.md
     docs/http-boundaries.md
     docs/adr/0001-tower-service-model.md
     docs/adr/0002-runtime-reconfiguration.md
@@ -62,6 +63,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - [crates/netplane-http](crates/netplane-http/): Optional HTTP adapter; depends on the core runtime.
 - [crates/netplane-control](crates/netplane-control/): Optional typed reconciliation; depends on the core runtime.
 - [docs/control-plane.md](docs/control-plane.md): Desired-state reconciliation contract.
+- [docs/control-plane-observability.md](docs/control-plane-observability.md): Reconciliation snapshots and audit events.
 - [crates/xtask](crates/xtask/): Development tooling; never a runtime dependency.
 - [README.md](README.md): Project overview and local commands.
 - [AGENTS.md](AGENTS.md): Coding contract and runtime invariants.

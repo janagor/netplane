@@ -29,7 +29,7 @@ pub enum DriverStatus<E> {
         /// Delay until another attempt, interruptible by updates and shutdown.
         retry_in: Option<Duration>,
     },
-    /// The worker has exited and released its owned resources.
+    /// The worker exited or was dropped and released its owned resources.
     Stopped,
 }
 
@@ -51,6 +51,7 @@ where
     Response: Send + 'static,
 {
     reconciler: Reconciler<D, P, Request, Response>,
+    _stop: crate::events::StopOnDrop<D, P::Error>,
     policy: UpdatePolicy,
     updates: watch::Receiver<Mailbox<D>>,
     status: watch::Sender<Arc<DriverStatus<P::Error>>>,
@@ -66,6 +67,8 @@ where
 {
     /// Create a worker and cloneable input handle without requiring a runtime.
     /// Preparation failures retry only when `is_transient` passed to `run` says so.
+    /// A previously stopped reconciler produces a stopped driver: update admission
+    /// is closed, both status channels report `Stopped`, and `run` exits immediately.
     /// # Errors
     /// Rejects zero or inconsistent scheduling limits and overflowing durations.
     pub fn new(
@@ -73,23 +76,40 @@ where
         policy: UpdatePolicy,
     ) -> Result<(Self, UpdateSender<D>), InvalidUpdatePolicy> {
         policy.validate()?;
+        let stopped = reconciler.status().phase == crate::ReconciliationPhase::Stopped;
         let (sender, updates) = watch::channel(Mailbox {
             update: None,
-            stopped: false,
+            stopped,
         });
-        let (status, _) = watch::channel(Arc::new(DriverStatus::Idle));
+        let sender = Arc::new(sender);
+        let initial = if stopped {
+            DriverStatus::Stopped
+        } else {
+            DriverStatus::Idle
+        };
+        let (status, _) = watch::channel(Arc::new(initial));
+        let observation = Arc::clone(&reconciler.observation);
         Ok((
             Self {
                 reconciler,
+                _stop: crate::events::StopOnDrop {
+                    observation: Arc::clone(&observation),
+                    outcomes: status.clone(),
+                    updates: Arc::downgrade(&sender),
+                },
                 policy,
                 updates,
                 status,
             },
-            UpdateSender(sender),
+            UpdateSender(sender, observation),
         ))
     }
 
     /// Subscribe to the latest transition, including typed failure and exhaustion.
+    ///
+    /// Graceful completion, forced cancellation, and unused driver drop all leave
+    /// this channel at `Stopped`, matching the reconciliation lifecycle snapshot.
+    /// The two channels are separate observations, not an atomic combined sample.
     #[must_use]
     pub fn status(&self) -> watch::Receiver<Arc<DriverStatus<P::Error>>> {
         self.status.subscribe()
@@ -132,6 +152,7 @@ where
     /// resubmit it to retrigger. External publications after success require another
     /// submission; this worker does not poll the runtime for drift.
     pub async fn run(mut self, is_transient: impl Fn(&P::Error) -> bool + Send) {
+        let observation = Arc::clone(&self.reconciler.observation);
         let mut completed = 0;
         'worker: loop {
             if self.stopped() {
@@ -159,6 +180,7 @@ where
                 if !self.is_current(sequence) {
                     continue 'worker;
                 }
+                observation.started(sequence);
                 self.status
                     .send_replace(Arc::new(DriverStatus::Preparing(sequence)));
                 let result = self
@@ -167,6 +189,13 @@ where
                         !self.stopped() && self.is_current(sequence)
                     })
                     .await;
+                // Record a successful commit even if a newer update won the race
+                // after the final freshness check. It never makes the newer state idle.
+                if result.is_ok() {
+                    observation.finish(sequence, &result, false);
+                } else if !self.is_current(sequence) || self.stopped() {
+                    observation.failed(sequence, &ApplyError::<P::Error>::Superseded, false);
+                }
                 if self.stopped() {
                     break 'worker;
                 }
@@ -180,7 +209,10 @@ where
                         completed = sequence;
                         break;
                     }
-                    Err(ApplyError::Publication(ControllerError::ShuttingDown)) => break 'worker,
+                    Err(error @ ApplyError::Publication(ControllerError::ShuttingDown)) => {
+                        observation.failed(sequence, &error, false);
+                        break 'worker;
+                    }
                     Err(error) => error,
                 };
                 let transient = match &error {
@@ -196,6 +228,7 @@ where
                         .max_retry_attempts
                         .is_none_or(|max| retries < max))
                 .then(|| self.policy.delay(retries, sequence));
+                observation.failed(sequence, &error, retry_in.is_some());
                 self.status.send_replace(Arc::new(DriverStatus::Failed {
                     sequence,
                     error,
@@ -217,6 +250,5 @@ where
         }
         // Drop preparation ownership before reporting completed cleanup.
         drop(self.reconciler);
-        self.status.send_replace(Arc::new(DriverStatus::Stopped));
     }
 }

@@ -3,7 +3,8 @@ use netplane::{
     ControllerOptions, GraphDraft, GraphVersion, Netplane, ReconfigurationController, RuntimeLimits,
 };
 use netplane_control::{
-    DriverStatus, GraphPreparer, Reconciler, ReconciliationDriver, UpdateError, UpdatePolicy,
+    DriverStatus, GraphPreparer, Reconciler, ReconciliationDriver,
+    ReconciliationFailure as Failure, ReconciliationPhase as Phase, UpdateError, UpdatePolicy,
 };
 use std::{
     sync::{
@@ -121,14 +122,20 @@ async fn wait_status(
 async fn burst_discards_obsolete_and_retains_old_request() -> TestResult {
     let f = fixture(policy())?;
     let mut status = f.driver.status();
+    assert!(!f.sender.status().is_converged());
+    assert_eq!(f.sender.status().desired_revision, None);
     f.sender.submit(2)?;
+    assert_eq!(f.sender.status().phase, Phase::Pending);
     let worker = tokio::spawn(f.driver.run(|_| true));
     f.entered.acquire().await?.forget();
+    assert_eq!(f.sender.status().phase, Phase::Preparing);
     let before = f.controller.inspect();
     let old = f.controller.handle().execute(());
     for value in 3..=1000 {
         f.sender.submit(value)?;
     }
+    assert_eq!(f.sender.status().desired_revision, Some(999));
+    assert_eq!(f.sender.status().applied_revision, None);
     f.gate.add_permits(1);
     f.entered.acquire().await?.forget();
     f.released.acquire().await?.forget();
@@ -136,6 +143,12 @@ async fn burst_discards_obsolete_and_retains_old_request() -> TestResult {
     assert_eq!(f.entered.available_permits(), 0);
     f.gate.add_permits(1);
     wait_status(&mut status, |s| matches!(s, DriverStatus::Applied(999, _))).await?;
+    assert!(f.sender.status().is_converged());
+    assert_eq!(f.sender.status().applied_revision, Some(999));
+    assert_eq!(
+        f.sender.status().active_publication,
+        f.controller.inspect().active.map(|a| a.id)
+    );
     assert_eq!(old.await?, 1);
     assert_eq!(f.controller.handle().execute(()).await?, 1000);
     f.sender.shutdown();
@@ -162,6 +175,10 @@ async fn transient_recovery_and_interruptible_retry() -> TestResult {
         )
     })
     .await?;
+    assert_eq!(f.sender.status().phase, Phase::RetryScheduled);
+    assert_eq!(f.sender.status().last_failure, Some(Failure::Preparation));
+    assert_eq!(f.sender.status().retry_attempt, 1);
+    assert_eq!(f.sender.status().applied_revision, None);
     assert_eq!(f.controller.handle().execute(()).await?, 1);
     f.sender.submit(3)?;
     wait_status(&mut status, |s| {
@@ -202,6 +219,9 @@ async fn invalid_and_exhausted_updates_wait_for_resubmission() -> TestResult {
         )
     })
     .await?;
+    assert_eq!(f.sender.status().phase, Phase::Blocked);
+    assert_eq!(f.sender.status().last_failure, Some(Failure::Validation));
+    assert!(!f.sender.status().is_converged());
     tokio::time::advance(Duration::from_secs(100)).await;
     assert_eq!(f.entered.available_permits(), 0);
     f.failures.store(1, Ordering::SeqCst);
@@ -237,6 +257,8 @@ async fn stale_publication_rebuilds_without_overwriting() -> TestResult {
         .publish_if_current(f.controller.current_token().ok_or("no token")?, graph(7)?)?;
     f.gate.add_permits(1);
     f.entered.acquire().await?.forget();
+    assert_eq!(f.sender.status().applied_revision, None);
+    assert_eq!(f.sender.status().last_failure, Some(Failure::Conflict));
     assert_eq!(f.controller.handle().execute(()).await?, 7);
     f.gate.add_permits(1);
     wait_status(&mut status, |s| matches!(s, DriverStatus::Applied(1, _))).await?;
@@ -260,6 +282,8 @@ async fn shutdown_during_preparation_discards_candidate() -> TestResult {
     worker.await?;
     f.released.acquire().await?.forget();
     wait_status(&mut status, |s| matches!(s, DriverStatus::Stopped)).await?;
+    assert_eq!(f.sender.status().phase, Phase::Stopped);
+    assert_eq!(f.sender.status().applied_revision, None);
     assert_eq!(f.controller.handle().execute(()).await?, 1);
     Ok(())
 }
@@ -405,11 +429,15 @@ async fn retry_delays_grow_and_do_not_prepare_early() -> TestResult {
 #[tokio::test(start_paused = true)]
 async fn dropping_worker_releases_preparation_without_detached_tasks() -> TestResult {
     let f = fixture(policy())?;
+    let outcomes = f.driver.status();
     f.sender.submit(2)?;
     let worker = tokio::spawn(f.driver.run(|_| true));
     f.entered.acquire().await?.forget();
     worker.abort();
     assert!(worker.await.is_err());
+    assert!(matches!(outcomes.borrow().as_ref(), DriverStatus::Stopped));
+    assert_eq!(f.sender.status().phase, Phase::Stopped);
+    assert!(!f.sender.status().is_converged());
     f.released.acquire().await?.forget();
     assert_eq!(f.sender.submit(3), Err(UpdateError::Stopped));
     assert_eq!(f.controller.handle().execute(()).await?, 1);

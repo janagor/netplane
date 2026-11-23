@@ -13,6 +13,7 @@ SOURCES=(
     docs/architecture.md
     docs/architecture/execution-semantics.md
     docs/control-plane.md
+    docs/control-plane-observability.md
     docs/http-boundaries.md
     docs/adr/0001-tower-service-model.md
     docs/adr/0002-runtime-reconfiguration.md

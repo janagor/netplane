@@ -7,6 +7,9 @@ pub enum ApplyError<E> {
     /// A driver observed a newer update or stop request before publication.
     #[error("desired state was superseded")]
     Superseded,
+    /// No further local revision numbers are available.
+    #[error("reconciliation revision exhausted")]
+    RevisionExhausted,
     /// Another call on this reconciler holds the preparation permit.
     #[error("reconciliation is already in progress")]
     Busy,

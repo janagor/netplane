@@ -9,9 +9,13 @@
 mod desired;
 mod driver;
 mod error;
+mod events;
+#[cfg(test)]
+mod events_tests;
 mod policy;
 mod prepare;
 mod reconciler;
+mod status;
 mod updates;
 
 pub use desired::{ApplyOutcome, LastApplied};
@@ -21,3 +25,5 @@ pub use policy::{InvalidUpdatePolicy, UpdatePolicy};
 pub use prepare::GraphPreparer;
 pub use reconciler::Reconciler;
 pub use updates::{DesiredUpdate, UpdateError, UpdateSender};
+
+pub use status::{ReconciliationFailure, ReconciliationPhase, ReconciliationStatus, Revision};

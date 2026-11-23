@@ -160,6 +160,12 @@ where
         }
     }
 
+    /// Stable process-local identifier shared with runtime tracing events.
+    #[must_use]
+    pub const fn runtime_id(&self) -> u64 {
+        self.handle.runtime_id
+    }
+
     /// Obtain a cloneable execution handle.
     #[must_use]
     pub fn handle(&self) -> Handle<Request, Response> {

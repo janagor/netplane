@@ -13,6 +13,14 @@ Netplane has not been released. Version and workspace manifests remain at `0.0.0
 - Performance methodology and a first local execution baseline.
 - External-consumer API tests for the core crate and optional HTTP adapter, plus benchmark compilation in CI on Rust 1.88.
 
+### Changed
+
+- `netplane-control` reconciliation status initialization makes `Reconciler::new()`
+  an ordinary function instead of a `const fn`; construct reconcilers at runtime.
+- Both reconciliation status channels now report `Stopped` on driver drop or
+  forced cancellation. Failure audit events carry the failed attempt's category
+  independently of the current status snapshot.
+
 ### Documentation
 
 - Release-readiness checklist and updated core crate guidance for routing, controller publication, deadlines and rollback.

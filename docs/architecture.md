@@ -35,6 +35,8 @@ The in-memory runtime accepts a Tower service root, bounds its concurrency and b
 
 The optional `netplane-control` crate adds [typed desired-state reconciliation](control-plane.md): explicit single-flight preparation, generation-aware deduplication, conditional publication, and explicit conflicts. An optional caller-owned single worker coalesces a bounded latest-value input,
 retries classified failures with capped backoff, and discards superseded candidates.
+[Reconciliation status and audit events](control-plane-observability.md) expose
+desired and applied revisions independently of runtime publication generations.
 Execution remains unchanged.
 
 ## Current limits and future work

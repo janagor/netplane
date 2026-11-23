@@ -17,6 +17,7 @@ pub struct Reconciler<D, P, Request: Send, Response> {
     preparer: P,
     preparation: Semaphore,
     last_applied: Mutex<Option<Arc<LastApplied<D>>>>,
+    pub(crate) observation: Arc<crate::events::Observation>,
 }
 
 impl<D, P, Request, Response> Reconciler<D, P, Request, Response>
@@ -27,17 +28,35 @@ where
     P: GraphPreparer<D, Request, Response> + Sync,
 {
     /// Start with no configuration record, even if the controller already runs a graph.
+    ///
+    /// This constructor inspects the controller to initialize publication status.
+    /// It is no longer `const`; consumers must construct reconcilers at runtime.
     #[must_use]
-    pub const fn new(
-        controller: Arc<ReconfigurationController<Request, Response>>,
-        preparer: P,
-    ) -> Self {
+    pub fn new(controller: Arc<ReconfigurationController<Request, Response>>, preparer: P) -> Self {
+        let snapshot = controller.inspect();
+        let observation = Arc::new(crate::events::Observation::new(
+            controller.runtime_id(),
+            snapshot.active.map(|active| active.id),
+        ));
         Self {
+            observation,
             controller,
             preparer,
             preparation: Semaphore::const_new(1),
             last_applied: Mutex::new(None),
         }
+    }
+
+    /// Read a consistent reconciliation snapshot. External publications are not monitored.
+    #[must_use]
+    pub fn status(&self) -> crate::ReconciliationStatus {
+        self.observation.status()
+    }
+
+    /// Subscribe to bounded latest-value status; intermediate transitions may coalesce.
+    #[must_use]
+    pub fn subscribe_status(&self) -> tokio::sync::watch::Receiver<crate::ReconciliationStatus> {
+        self.observation.subscribe()
     }
 
     /// Return the last successful application, which may have been superseded externally.
@@ -62,8 +81,38 @@ where
     /// Returns [`ApplyError::Busy`] immediately when another polled call is active,
     /// or a validation, preparation, or conditional publication error. Shutdown is
     /// rejected before preparation when already visible, or at publication otherwise.
+    /// Exhausted local revision numbers reject new work before validation.
     pub async fn apply(&self, desired: D) -> Result<ApplyOutcome, ApplyError<P::Error>> {
-        self.apply_checked(desired, || true).await
+        if self.status().phase == crate::ReconciliationPhase::Stopped {
+            return Err(ApplyError::Publication(ControllerError::ShuttingDown));
+        }
+        let _permit = self
+            .preparation
+            .try_acquire()
+            .map_err(|_| ApplyError::Busy)?;
+        let revision = self
+            .status()
+            .desired_revision
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(ApplyError::RevisionExhausted)?;
+        self.observation.desired(revision).emit();
+        self.observation.started(revision);
+        let mut guard = AttemptGuard {
+            observation: Arc::clone(&self.observation),
+            revision,
+            armed: true,
+        };
+        let result = self.apply_candidate(desired, || true).await;
+        guard.armed = false;
+        self.observation.finish(revision, &result, false);
+        if matches!(
+            result,
+            Err(ApplyError::Publication(ControllerError::ShuttingDown))
+        ) {
+            self.observation.stop();
+        }
+        result
     }
 
     pub(crate) async fn apply_checked(
@@ -75,6 +124,14 @@ where
             .preparation
             .try_acquire()
             .map_err(|_| ApplyError::Busy)?;
+        self.apply_candidate(desired, current).await
+    }
+
+    async fn apply_candidate(
+        &self,
+        desired: D,
+        current: impl Fn() -> bool + Send,
+    ) -> Result<ApplyOutcome, ApplyError<P::Error>> {
         self.preparer
             .validate(&desired)
             .map_err(ApplyError::Validation)?;
@@ -118,5 +175,24 @@ where
             .replace(record);
         drop(previous);
         Ok(ApplyOutcome::Applied(outcome))
+    }
+}
+
+struct AttemptGuard {
+    observation: Arc<crate::events::Observation>,
+    revision: u64,
+    armed: bool,
+}
+impl Drop for AttemptGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.observation
+                .change(crate::events::Kind::Failed, Some(self.revision), |s| {
+                    s.phase = crate::ReconciliationPhase::Blocked;
+                    s.last_failure = Some(crate::ReconciliationFailure::Cancelled);
+                })
+                .with_failure(crate::ReconciliationFailure::Cancelled)
+                .emit();
+        }
     }
 }

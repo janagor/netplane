@@ -123,5 +123,6 @@ status subscription, and joined shutdown example. Paused-time tests cover bursts
 superseded preparation, retry interruption and exhaustion, stale tokens, bounded
 coalescing windows, and shutdown during preparation or retry.
 
-Discovery integrations and a full desired-versus-actual audit stream remain future
-extensions.
+Read [reconciliation observability](control-plane-observability.md) for consistent
+desired/applied revision snapshots, bounded status subscriptions, and structured
+audit events. Discovery integrations remain future extensions.

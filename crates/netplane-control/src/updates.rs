@@ -17,7 +17,10 @@ pub struct Mailbox<D> {
 
 /// A bounded latest-value producer. Clones share sequencing and one pending slot.
 #[derive(Clone)]
-pub struct UpdateSender<D>(pub(crate) watch::Sender<Mailbox<D>>);
+pub struct UpdateSender<D>(
+    pub(crate) Arc<watch::Sender<Mailbox<D>>>,
+    pub(crate) Arc<crate::events::Observation>,
+);
 
 /// An update could not be accepted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -36,25 +39,49 @@ impl<D> UpdateSender<D> {
     /// Resubmission explicitly retriggers invalid or exhausted updates.
     /// # Errors
     /// Returns an error after shutdown, worker drop, or sequence exhaustion.
+    /// A previously stopped reconciler cannot accept updates through a new driver.
     pub fn submit(&self, desired: D) -> Result<u64, UpdateError> {
         if self.0.is_closed() {
             return Err(UpdateError::Stopped);
         }
         let mut result = Err(UpdateError::Stopped);
+        let mut event = None;
         self.0.send_if_modified(|mailbox| {
-            if mailbox.stopped {
+            let status = self.1.status();
+            if mailbox.stopped || status.phase == crate::ReconciliationPhase::Stopped {
                 return false;
             }
-            let previous = mailbox.update.as_ref().map_or(0, |update| update.sequence);
+            let previous = mailbox
+                .update
+                .as_ref()
+                .map_or(status.desired_revision.unwrap_or(0), |update| {
+                    update.sequence
+                });
             let Some(sequence) = previous.checked_add(1) else {
                 result = Err(UpdateError::SequenceExhausted);
                 return false;
             };
             mailbox.update = Some(Arc::new(DesiredUpdate { sequence, desired }));
+            event = Some(self.1.desired(sequence));
             result = Ok(sequence);
             true
         });
+        if let Some(event) = event {
+            event.emit();
+        }
         result
+    }
+
+    /// Read a consistent snapshot, including the latest accepted desired revision.
+    #[must_use]
+    pub fn status(&self) -> crate::ReconciliationStatus {
+        self.1.status()
+    }
+
+    /// Subscribe to latest-value observations without retaining an event queue.
+    #[must_use]
+    pub fn subscribe_status(&self) -> watch::Receiver<crate::ReconciliationStatus> {
+        self.1.subscribe()
     }
 
     /// Close update admission immediately and request graceful worker shutdown.
@@ -78,12 +105,30 @@ mod tests {
     use tokio::sync::watch;
 
     #[test]
+    fn stopped_observation_rejects_submission_even_if_mailbox_is_open() {
+        let (sender, receiver) = watch::channel(Mailbox {
+            update: None,
+            stopped: false,
+        });
+        let observation = Arc::new(crate::events::Observation::new(0, None));
+        observation.stop();
+        let updates = UpdateSender(Arc::new(sender), observation);
+        let stopped = updates.status();
+        assert_eq!(updates.submit(1), Err(UpdateError::Stopped));
+        assert_eq!(updates.status(), stopped);
+        assert!(receiver.borrow().update.is_none());
+    }
+
+    #[test]
     fn overwritten_inputs_are_released_and_sequences_are_checked() -> Result<(), UpdateError> {
         let (sender, receiver) = watch::channel(Mailbox {
             update: None,
             stopped: false,
         });
-        let updates = UpdateSender(sender);
+        let updates = UpdateSender(
+            Arc::new(sender),
+            Arc::new(crate::events::Observation::new(0, None)),
+        );
         for sequence in 1..=1000 {
             let desired = Arc::new(sequence);
             let weak = Arc::downgrade(&desired);
@@ -125,7 +170,10 @@ mod concurrent_tests {
             update: None,
             stopped: false,
         });
-        let updates = UpdateSender(sender);
+        let updates = UpdateSender(
+            Arc::new(sender),
+            Arc::new(crate::events::Observation::new(0, None)),
+        );
         let barrier = Arc::new(Barrier::new(8));
         let mut producers = JoinSet::new();
         for producer in 0..8 {
@@ -156,6 +204,7 @@ mod concurrent_tests {
             .clone()
             .ok_or("missing latest update")?;
         assert_eq!(accepted.last(), Some(&(latest.sequence, latest.desired)));
+        assert_eq!(updates.status().desired_revision, Some(latest.sequence));
         Ok(())
     }
 }
