@@ -110,5 +110,17 @@ fn route_lookup(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, routing, route_lookup);
+fn weighted_selection(c: &mut Criterion) {
+    let policy = netplane::WeightedRouting::try_new([("canary", 25), ("stable", 75)]).unwrap();
+    let mut group = c.benchmark_group("routing/weighted");
+    group.bench_function("borrowed_label", |b| {
+        b.iter(|| black_box(policy.select(black_box(b"customer-1"))));
+    });
+    group.bench_function("owned_router_label", |b| {
+        b.iter(|| black_box(policy.select(black_box(b"customer-1")).to_owned()));
+    });
+    group.finish();
+}
+
+criterion_group!(benches, routing, route_lookup, weighted_selection);
 criterion_main!(benches);

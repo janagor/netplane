@@ -25,6 +25,7 @@ pub use endpoint::Endpoint;
 mod lifecycle;
 mod observability;
 mod routed;
+pub mod routing;
 pub use graph::{
     BackendCapacityMetadata, GraphBuildError, GraphBuilder, GraphMetadata, NodeKind, NodeMetadata,
     RouteMetadata,
@@ -32,6 +33,7 @@ pub use graph::{
 use lifecycle::Admission;
 pub use lifecycle::{AdmissionError, DrainError, LifecycleState, RuntimeStatus};
 use observability::{trace_publication, trace_publish_rejection};
+pub use routing::{WeightedRouting, WeightedRoutingError};
 use thiserror::Error;
 use tower::{BoxError, Service};
 

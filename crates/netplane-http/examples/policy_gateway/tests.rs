@@ -14,7 +14,7 @@ use super::{
     HttpRequest,
     config::{GatewayConfig, InvalidPolicy},
     graph::build_graph,
-    routing::{canary_bucket, select_backend, valid_request_key},
+    routing::{select_backend, valid_request_key},
 };
 
 #[path = "../../tests/common/http_response.rs"]
@@ -49,32 +49,37 @@ fn rejects_invalid_policy() {
 }
 
 #[test]
-fn canary_hash_is_stable() {
+fn canary_hash_is_stable() -> Result<(), BoxError> {
     for (key, bucket) in [
         ("customer-1", 19),
         ("customer-2", 30),
         ("customer-3", 41),
         ("user-1", 8),
     ] {
-        assert_eq!(canary_bucket(key.as_bytes()), bucket);
+        let below =
+            netplane::WeightedRouting::try_new([("canary", bucket), ("stable", 100 - bucket)])?;
+        let above =
+            netplane::WeightedRouting::try_new([("canary", bucket + 1), ("stable", 99 - bucket)])?;
+        assert_eq!(below.select(key.as_bytes()), "stable");
+        assert_eq!(above.select(key.as_bytes()), "canary");
     }
     assert!(valid_request_key(b"abc-._123"));
     assert!(!valid_request_key(b""));
     assert!(!valid_request_key(b"bad key"));
     assert!(!valid_request_key(&[b'a'; 129]));
+    Ok(())
 }
 
 #[test]
 fn canary_rollout_is_monotonic() -> Result<(), BoxError> {
-    let mut policy = GatewayConfig::default().policy;
+    let ten = netplane::WeightedRouting::try_new([("canary", 10), ("stable", 90)])?;
+    let expanded = netplane::WeightedRouting::try_new([("canary", 25), ("stable", 75)])?;
     for index in 0..500 {
         let key = format!("key-{index}");
         let request = request(Method::POST, "/process", Some(&key), b"")?;
-        policy.canary_percent = 10;
-        let at_ten = select_backend(&request, &policy);
-        policy.canary_percent = 25;
+        let at_ten = select_backend(&request, &ten);
         if at_ten == "canary" {
-            assert_eq!(select_backend(&request, &policy), "canary");
+            assert_eq!(select_backend(&request, &expanded), "canary");
         }
     }
     Ok(())

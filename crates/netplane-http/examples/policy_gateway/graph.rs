@@ -1,4 +1,4 @@
-use netplane::{Capacity, GraphBuilder, GraphVersion};
+use netplane::{Capacity, GraphBuilder, GraphVersion, WeightedRouting};
 use tower::BoxError;
 
 use super::{HttpRequest, HttpResponse, backends, config::PolicyConfig, routing::select_backend};
@@ -9,16 +9,22 @@ pub fn build_graph(
     backend_capacity: Capacity,
 ) -> Result<GraphVersion<HttpRequest, HttpResponse>, BoxError> {
     policy.validate()?;
-    let snapshot = policy.clone();
-    Ok(GraphBuilder::new()
+    let weighted = WeightedRouting::try_new([
+        ("canary", policy.canary_percent),
+        ("stable", 100 - policy.canary_percent),
+    ])?;
+    let snapshot = weighted.clone();
+    let mut builder = GraphBuilder::new()
         .service("stable", backends::stable_backend(policy))
         .service("canary", backends::canary_backend(policy))
         .service("fallback", backends::fallback_backend(policy))
         .router("policy", move |request: &HttpRequest| {
-            select_backend(request, &snapshot)
-        })
-        .route("policy", "stable", "stable")
-        .route("policy", "canary", "canary")
+            select_backend(request, &snapshot).to_owned()
+        });
+    for target in weighted.targets() {
+        builder = builder.route("policy", target, target);
+    }
+    Ok(builder
         .fallback("policy", "fallback")
         .entry("policy")
         .capacity(outer_capacity)
