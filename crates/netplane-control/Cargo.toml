@@ -14,9 +14,9 @@ workspace = true
 
 [dependencies]
 netplane = { version = "0.0.0", path = "../netplane" }
-tokio.workspace = true
+tokio = { workspace = true, features = ["macros"] }
 thiserror.workspace = true
 
 [dev-dependencies]
 tower.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

@@ -1,0 +1,222 @@
+use std::{sync::Arc, time::Duration};
+
+use netplane::ControllerError;
+use tokio::{
+    sync::watch,
+    time::{Instant, sleep},
+};
+
+use crate::{
+    ApplyError, ApplyOutcome, GraphPreparer, InvalidUpdatePolicy, Reconciler, UpdatePolicy,
+    UpdateSender, updates::Mailbox,
+};
+
+/// Most recent worker transition; intermediate transitions may be overwritten.
+#[derive(Debug)]
+pub enum DriverStatus<E> {
+    /// Waiting for the first desired state.
+    Idle,
+    /// Validating or preparing this local sequence.
+    Preparing(u64),
+    /// This sequence completed successfully at the reported publication.
+    Applied(u64, ApplyOutcome),
+    /// A failed attempt; `retry_in` is absent for permanent or exhausted failures.
+    Failed {
+        /// Failed local sequence.
+        sequence: u64,
+        /// Original typed reconciliation failure.
+        error: ApplyError<E>,
+        /// Delay until another attempt, interruptible by updates and shutdown.
+        retry_in: Option<Duration>,
+    },
+    /// The worker has exited and released its owned resources.
+    Stopped,
+}
+
+/// Caller-owned single reconciliation worker with bounded latest-value input.
+///
+/// Construction spawns no tasks. Poll [`Self::run`] directly or spawn it on an
+/// application-owned executor and retain the join handle. Graceful shutdown waits
+/// for active preparation to finish and can wait indefinitely for an uncooperative
+/// preparer. For forced cancellation, drop the `run` future, or abort and join its
+/// task; this drops preparation following [`GraphPreparer`]'s cleanup contract.
+/// Shutdown closes update admission, but a publication that already passed its
+/// final freshness check can still commit. Await worker completion to ensure no
+/// further driver publication is possible. No child task or timer survives
+/// that drop. Independently spawned application work remains its responsibility.
+pub struct ReconciliationDriver<D, P, Request, Response>
+where
+    P: GraphPreparer<D, Request, Response>,
+    Request: Send + 'static,
+    Response: Send + 'static,
+{
+    reconciler: Reconciler<D, P, Request, Response>,
+    policy: UpdatePolicy,
+    updates: watch::Receiver<Mailbox<D>>,
+    status: watch::Sender<Arc<DriverStatus<P::Error>>>,
+}
+
+impl<D, P, Request, Response> ReconciliationDriver<D, P, Request, Response>
+where
+    D: Clone + Eq + Send + Sync,
+    Request: Send + 'static,
+    Response: Send + 'static,
+    P: GraphPreparer<D, Request, Response> + Sync,
+    P::Error: Send + Sync,
+{
+    /// Create a worker and cloneable input handle without requiring a runtime.
+    /// Preparation failures retry only when `is_transient` passed to `run` says so.
+    /// # Errors
+    /// Rejects zero or inconsistent scheduling limits and overflowing durations.
+    pub fn new(
+        reconciler: Reconciler<D, P, Request, Response>,
+        policy: UpdatePolicy,
+    ) -> Result<(Self, UpdateSender<D>), InvalidUpdatePolicy> {
+        policy.validate()?;
+        let (sender, updates) = watch::channel(Mailbox {
+            update: None,
+            stopped: false,
+        });
+        let (status, _) = watch::channel(Arc::new(DriverStatus::Idle));
+        Ok((
+            Self {
+                reconciler,
+                policy,
+                updates,
+                status,
+            },
+            UpdateSender(sender),
+        ))
+    }
+
+    /// Subscribe to the latest transition, including typed failure and exhaustion.
+    #[must_use]
+    pub fn status(&self) -> watch::Receiver<Arc<DriverStatus<P::Error>>> {
+        self.status.subscribe()
+    }
+
+    fn stopped(&self) -> bool {
+        self.updates.borrow().stopped || self.updates.has_changed().is_err()
+    }
+
+    fn is_current(&self, sequence: u64) -> bool {
+        self.updates
+            .borrow()
+            .update
+            .as_ref()
+            .is_some_and(|latest| latest.sequence == sequence)
+    }
+
+    async fn coalesce(&mut self) -> bool {
+        let deadline = Instant::now() + self.policy.max_coalesce_window;
+        loop {
+            let quiet = (Instant::now() + self.policy.debounce).min(deadline);
+            tokio::select! {
+                () = tokio::time::sleep_until(quiet) => return !self.stopped(),
+                changed = self.updates.changed() => {
+                    if changed.is_err() || self.stopped() { return false; }
+                }
+            }
+            if Instant::now() >= deadline {
+                return true;
+            }
+        }
+    }
+
+    /// Run until explicit shutdown, all producers disappear, or runtime shutdown.
+    ///
+    /// Validation errors are permanent. The classifier applies only to preparation
+    /// errors. Stale publications always re-inspect and rebuild after bounded
+    /// backoff; other publication errors are permanent except shutdown, which exits.
+    /// A finite retry budget leaves the desired state retained in the input slot;
+    /// resubmit it to retrigger. External publications after success require another
+    /// submission; this worker does not poll the runtime for drift.
+    pub async fn run(mut self, is_transient: impl Fn(&P::Error) -> bool + Send) {
+        let mut completed = 0;
+        'worker: loop {
+            if self.stopped() {
+                break;
+            }
+            let update = self.updates.borrow_and_update().update.clone();
+            let Some(_) = update.filter(|update| update.sequence != completed) else {
+                if self.updates.changed().await.is_err() {
+                    break;
+                }
+                continue;
+            };
+            if !self.coalesce().await {
+                break;
+            }
+            let Some(update) = self.updates.borrow_and_update().update.clone() else {
+                continue;
+            };
+            let sequence = update.sequence;
+            let mut retries = 0_usize;
+            loop {
+                if self.stopped() {
+                    break 'worker;
+                }
+                if !self.is_current(sequence) {
+                    continue 'worker;
+                }
+                self.status
+                    .send_replace(Arc::new(DriverStatus::Preparing(sequence)));
+                let result = self
+                    .reconciler
+                    .apply_checked(update.desired.clone(), || {
+                        !self.stopped() && self.is_current(sequence)
+                    })
+                    .await;
+                if self.stopped() {
+                    break 'worker;
+                }
+                if !self.is_current(sequence) {
+                    continue 'worker;
+                }
+                let error = match result {
+                    Ok(outcome) => {
+                        self.status
+                            .send_replace(Arc::new(DriverStatus::Applied(sequence, outcome)));
+                        completed = sequence;
+                        break;
+                    }
+                    Err(ApplyError::Publication(ControllerError::ShuttingDown)) => break 'worker,
+                    Err(error) => error,
+                };
+                let transient = match &error {
+                    ApplyError::Preparation(error) => is_transient(error),
+                    ApplyError::Publication(ControllerError::Stale { .. }) | ApplyError::Busy => {
+                        true
+                    }
+                    _ => false,
+                };
+                let retry_in = (transient
+                    && self
+                        .policy
+                        .max_retry_attempts
+                        .is_none_or(|max| retries < max))
+                .then(|| self.policy.delay(retries, sequence));
+                self.status.send_replace(Arc::new(DriverStatus::Failed {
+                    sequence,
+                    error,
+                    retry_in,
+                }));
+                let Some(delay) = retry_in else {
+                    completed = sequence;
+                    break;
+                };
+                retries = retries.saturating_add(1);
+                tokio::select! {
+                    () = sleep(delay) => {},
+                    changed = self.updates.changed() => {
+                        if changed.is_err() { break 'worker; }
+                        continue 'worker;
+                    }
+                }
+            }
+        }
+        // Drop preparation ownership before reporting completed cleanup.
+        drop(self.reconciler);
+        self.status.send_replace(Arc::new(DriverStatus::Stopped));
+    }
+}

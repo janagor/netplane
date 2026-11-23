@@ -33,7 +33,9 @@ The in-memory runtime accepts a Tower service root, bounds its concurrency and b
 
 `WeightedRouting` supplies an optional immutable selector over ordered named backends. It validates integer percentages totaling 100 and deterministically assigns sticky keys using FNV-1a modulo 100. Policies own no services or workers; applications register policy labels with ordinary `GraphBuilder` routes and publish replacement graphs to change weights. Graph validation remains responsible for service references. Weights allocate key buckets rather than guaranteeing request traffic, and the non-cryptographic hash provides no security boundary.
 
-The optional `netplane-control` crate adds [typed desired-state reconciliation](control-plane.md): explicit single-flight preparation, generation-aware deduplication, conditional publication, and explicit conflicts. It owns no background loop and leaves execution unchanged.
+The optional `netplane-control` crate adds [typed desired-state reconciliation](control-plane.md): explicit single-flight preparation, generation-aware deduplication, conditional publication, and explicit conflicts. An optional caller-owned single worker coalesces a bounded latest-value input,
+retries classified failures with capped backoff, and discards superseded candidates.
+Execution remains unchanged.
 
 ## Current limits and future work
 

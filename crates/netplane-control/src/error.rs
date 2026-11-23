@@ -4,6 +4,9 @@ use thiserror::Error;
 /// Failed reconciliation; the call did not replace the active graph.
 #[derive(Debug, Error)]
 pub enum ApplyError<E> {
+    /// A driver observed a newer update or stop request before publication.
+    #[error("desired state was superseded")]
+    Superseded,
     /// Another call on this reconciler holds the preparation permit.
     #[error("reconciliation is already in progress")]
     Busy,

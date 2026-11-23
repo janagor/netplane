@@ -12,4 +12,4 @@ The canonical [architecture contract](https://github.com/janagor/netplane/blob/m
 - [ADR 0004: Graph composition](https://github.com/janagor/netplane/blob/main/docs/adr/0004-graph-composition.md)
 - [ADR 0005: Reconfiguration control](https://github.com/janagor/netplane/blob/main/docs/adr/0005-reconfiguration-control.md)
 
-The workspace has `crates/netplane` for the transport-independent runtime, `crates/netplane-http` for the optional HTTP adapter, and `crates/xtask` for development automation.
+The workspace has `crates/netplane` for the transport-independent runtime, `crates/netplane-http` for the optional HTTP adapter, `crates/netplane-control` for optional typed reconciliation and bounded update scheduling, and `crates/xtask` for development automation.

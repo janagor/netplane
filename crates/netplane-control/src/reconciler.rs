@@ -63,6 +63,14 @@ where
     /// or a validation, preparation, or conditional publication error. Shutdown is
     /// rejected before preparation when already visible, or at publication otherwise.
     pub async fn apply(&self, desired: D) -> Result<ApplyOutcome, ApplyError<P::Error>> {
+        self.apply_checked(desired, || true).await
+    }
+
+    pub(crate) async fn apply_checked(
+        &self,
+        desired: D,
+        current: impl Fn() -> bool + Send,
+    ) -> Result<ApplyOutcome, ApplyError<P::Error>> {
         let _permit = self
             .preparation
             .try_acquire()
@@ -90,6 +98,11 @@ where
             .prepare(desired)
             .await
             .map_err(ApplyError::Preparation)?;
+        // This check and conditional publication are separate operations. Driver
+        // shutdown or a newer update can race after the check and before commit.
+        if !current() {
+            return Err(ApplyError::Superseded);
+        }
         let outcome = self
             .controller
             .publish_if_current(token, candidate)
