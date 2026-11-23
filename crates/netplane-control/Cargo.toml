@@ -1,0 +1,22 @@
+[package]
+name = "netplane-control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Typed desired-state reconciliation for Netplane"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+netplane = { version = "0.0.0", path = "../netplane" }
+tokio.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

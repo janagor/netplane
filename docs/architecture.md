@@ -21,6 +21,7 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 | --- | --- |
 | `crates/netplane` | Public, transport-independent runtime library. Keep its public dependency surface small. |
 | `crates/netplane-http` | Optional bounded HTTP ingress and Axum listener integration; depends on `netplane`. |
+| `crates/netplane-control` | Optional typed desired-state reconciliation; depends on `netplane`. |
 | `crates/xtask` | Build and quality automation. Never a runtime dependency of `netplane`. |
 | `docs/adr` | Accepted architectural decisions and their consequences. |
 
@@ -31,6 +32,8 @@ The HTTP adapter is a separate crate because body buffering, status mapping, and
 The in-memory runtime accepts a Tower service root, bounds its concurrency and buffer per version, enforces a global accepted-request budget, and publishes validated immutable versions atomically. Requests retain the version selected when `Handle::execute()` is called. Cancellation, worker ownership, and graceful shutdown follow the [execution contract](architecture/execution-semantics.md). Integration tests exercise publication, readiness, resource lifetime, and shutdown without sockets. `GraphBuilder` exposes the [composition prototype](adr/0004-graph-composition.md) as a validated single-router composition over named, independently bounded backend endpoints. Ordinary Tower layers provide middleware.
 
 `WeightedRouting` supplies an optional immutable selector over ordered named backends. It validates integer percentages totaling 100 and deterministically assigns sticky keys using FNV-1a modulo 100. Policies own no services or workers; applications register policy labels with ordinary `GraphBuilder` routes and publish replacement graphs to change weights. Graph validation remains responsible for service references. Weights allocate key buckets rather than guaranteeing request traffic, and the non-cryptographic hash provides no security boundary.
+
+The optional `netplane-control` crate adds [typed desired-state reconciliation](control-plane.md): explicit single-flight preparation, generation-aware deduplication, conditional publication, and explicit conflicts. It owns no background loop and leaves execution unchanged.
 
 ## Current limits and future work
 

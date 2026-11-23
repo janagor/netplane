@@ -13,6 +13,7 @@ SOURCES=(
     CONTRIBUTING.md
     docs/architecture.md
     docs/architecture/execution-semantics.md
+    docs/control-plane.md
     docs/http-boundaries.md
     docs/adr/0001-tower-service-model.md
     docs/adr/0002-runtime-reconfiguration.md
@@ -46,6 +47,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - GraphBuilder's validated single-router composition over named Tower services and middleware.
 - ReconfigurationController publication, rollback history, and structured runtime tracing.
 - Optional netplane-http adapter with bounded body ingress and live listener reconfiguration.
+- Optional netplane-control typed desired-state reconciliation with single-flight preparation and explicit publication conflicts.
 
 ## Limits and planned work
 
@@ -58,6 +60,8 @@ cat > "${LLMS_FILE}" << OVERVIEW
 
 - [crates/netplane](crates/netplane/): Public runtime library; transport and deployment independent.
 - [crates/netplane-http](crates/netplane-http/): Optional HTTP adapter; depends on the core runtime.
+- [crates/netplane-control](crates/netplane-control/): Optional typed reconciliation; depends on the core runtime.
+- [docs/control-plane.md](docs/control-plane.md): Desired-state reconciliation contract.
 - [crates/xtask](crates/xtask/): Development tooling; never a runtime dependency.
 - [README.md](README.md): Project overview and local commands.
 - [AGENTS.md](AGENTS.md): Coding contract and runtime invariants.

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/netplane", "crates/netplane-http", "crates/xtask"]
+members = ["crates/netplane", "crates/netplane-http", "crates/netplane-control", "crates/xtask"]
 default-members = ["crates/netplane"]
 resolver = "3"
 exclude = ["fuzz"]
