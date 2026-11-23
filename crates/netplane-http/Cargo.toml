@@ -14,6 +14,11 @@ name = "policy_gateway"
 path = "examples/policy_gateway/main.rs"
 test = true
 
+[[example]]
+name = "upstream_gateway"
+path = "examples/upstream_gateway/main.rs"
+test = true
+
 [lints]
 workspace = true
 
@@ -28,8 +33,11 @@ tracing.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
+reqwest.workspace = true
+url.workspace = true
+thiserror.workspace = true
 futures-util.workspace = true
 httparse.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "signal", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "io-std", "signal", "test-util"] }
