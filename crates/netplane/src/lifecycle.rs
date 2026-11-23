@@ -33,6 +33,9 @@ pub enum DrainError {
 struct State {
     phase: LifecycleState,
     outstanding: usize,
+    admitted_total: u64,
+    rejected_at_capacity_total: u64,
+    rejected_closed_total: u64,
 }
 
 /// Admission and shutdown phase of a Netplane runtime.
@@ -56,6 +59,12 @@ pub struct RuntimeStatus {
     pub max_outstanding: usize,
     /// Lifecycle phase sampled with `outstanding` under one lock.
     pub lifecycle: LifecycleState,
+    /// Requests accepted synchronously, including futures dropped before polling. Saturates at `u64::MAX`.
+    pub admitted_total: u64,
+    /// Admission attempts rejected because the global capacity was reached. Saturates at `u64::MAX`.
+    pub rejected_at_capacity_total: u64,
+    /// Admission attempts rejected because shutdown had begun. Saturates at `u64::MAX`.
+    pub rejected_closed_total: u64,
 }
 
 pub struct Admission {
@@ -71,6 +80,9 @@ impl Admission {
             state: Mutex::new(State {
                 phase: LifecycleState::Running,
                 outstanding: 0,
+                admitted_total: 0,
+                rejected_at_capacity_total: 0,
+                rejected_closed_total: 0,
             }),
             max_outstanding,
             changed,
@@ -83,14 +95,17 @@ impl Admission {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.phase != LifecycleState::Running {
+            state.rejected_closed_total = state.rejected_closed_total.saturating_add(1);
             return Err(AdmissionError::Closed);
         }
         if state.outstanding >= self.max_outstanding {
+            state.rejected_at_capacity_total = state.rejected_at_capacity_total.saturating_add(1);
             return Err(AdmissionError::AtCapacity {
                 limit: self.max_outstanding,
             });
         }
         state.outstanding += 1;
+        state.admitted_total = state.admitted_total.saturating_add(1);
         self.changed.send_replace(state.outstanding);
         drop(state);
         Ok(AdmissionGuard(Arc::clone(self)))
@@ -132,6 +147,9 @@ impl Admission {
             outstanding: state.outstanding,
             max_outstanding: self.max_outstanding,
             lifecycle: state.phase,
+            admitted_total: state.admitted_total,
+            rejected_at_capacity_total: state.rejected_at_capacity_total,
+            rejected_closed_total: state.rejected_closed_total,
         }
     }
 

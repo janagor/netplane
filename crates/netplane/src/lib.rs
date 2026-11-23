@@ -16,7 +16,7 @@ use arc_swap::ArcSwapOption;
 mod controller;
 mod endpoint;
 pub use controller::{
-    ControllerError, ControllerOptions, ControllerSnapshot, PublicationKind,
+    ControllerCounters, ControllerError, ControllerOptions, ControllerSnapshot, PublicationKind,
     ReconfigurationController, ReconfigurationOutcome, VersionSnapshot, VersionToken,
 };
 mod graph;

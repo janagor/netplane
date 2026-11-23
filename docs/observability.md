@@ -53,3 +53,41 @@ Controller publication and shutdown-start events are emitted after releasing the
 Default events contain no request, response, header, selector output, graph name, or arbitrary error text. Netplane's worker event omits panic payloads, but Rust's panic hook or an application-installed hook may independently print them to stderr. Dropping a dispatched request does not guarantee termination of independently spawned service work.
 
 See the [example](../crates/netplane/examples/observability.rs) for subscriber setup.
+
+## Cumulative status counters
+
+`Handle::status()` samples lifecycle, outstanding requests, and cumulative
+admission counters under one existing admission lock. `admitted_total` increments
+synchronously when admission succeeds, even if the returned future is never
+polled. Completion, cancellation, or deadline expiration releases outstanding
+capacity without reducing this total. `rejected_at_capacity_total` and
+`rejected_closed_total` count failed admission attempts once through the shared
+execution path; shutdown closure takes precedence over capacity.
+
+`rejected_at_capacity_total` measures only the runtime-global admission limit.
+It does not count per-backend Tower queue saturation, routing failures, or other
+downstream failures, and is not a complete count of overloaded requests.
+
+`ReconfigurationController::inspect().counters` reports `ControllerCounters`:
+`replacements_total`, `rollbacks_total`, and `rejected_total`. These count only
+operations attempted through `publish_if_current()` and `rollback_if_current()`.
+Initial publication, candidate validation failures, and direct `Netplane::publish()`
+calls are excluded. Every returned controller error counts as one rejection,
+including shutdown, foreign or stale tokens, unavailable history, and generation
+exhaustion. Counters update under the existing controller lock before tracing
+callbacks run, coherently with publication metadata.
+
+All counters start at zero, saturate at `u64::MAX`, and persist across publication
+and shutdown. Status reads do not change counters. Cloned handles share runtime
+totals. Runtime and controller snapshots are separate samples and need not
+describe the same instant. Retained history counts rollback-eligible publication
+entries, not every version still owned by requests or every live executable graph.
+
+The gateway's existing authenticated `GET /status` exposes admission totals inside
+`runtime` and controller totals inside `counters`. Gateway policy validation and
+conflicts rejected before calling the controller are outside controller totals.
+These plain snapshots add no metrics exporter dependency; Prometheus,
+OpenTelemetry, histograms, and per-backend statistics remain future work.
+
+See the [local counter performance check](observability-performance.md) for
+admission and concurrent throughput comparisons against the base commit.

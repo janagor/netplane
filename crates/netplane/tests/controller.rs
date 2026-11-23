@@ -90,6 +90,11 @@ fn controller(
 #[tokio::test]
 async fn replacement_rollback_and_bounded_history() -> TestResult {
     let control = controller(2)?;
+    assert_eq!(
+        control.inspect().counters,
+        netplane::ControllerCounters::default()
+    );
+    assert_eq!(control.inspect(), control.inspect());
     let handle = control.handle();
     let original = control.inspect().active.ok_or("missing original")?.id;
     let selected = handle.try_execute(0)?;
@@ -119,6 +124,9 @@ async fn replacement_rollback_and_bounded_history() -> TestResult {
     assert_eq!(snapshot.retained.len(), 2);
     assert_eq!(snapshot.retained[0].id, first.published);
     assert_eq!(snapshot.last_outcome, Some(rollback));
+    assert_eq!(snapshot.counters.replacements_total, 2);
+    assert_eq!(snapshot.counters.rollbacks_total, 1);
+    assert_eq!(snapshot.counters.rejected_total, 0);
     assert_eq!(
         control.rollback_if_current(control.current_token().ok_or("missing token")?, original),
         Err(ControllerError::UnknownVersion(original))
@@ -160,6 +168,8 @@ async fn concurrent_writers_and_foreign_tokens() -> TestResult {
         1
     );
     assert_eq!(control.inspect().retained.len(), 0);
+    assert_eq!(control.inspect().counters.replacements_total, 1);
+    assert_eq!(control.inspect().counters.rejected_total, 2);
     Ok(())
 }
 
@@ -232,6 +242,10 @@ async fn invalid_candidate_and_shutdown_without_poll() -> TestResult {
     .validate::<usize, usize>();
     assert!(invalid.is_err());
     assert_eq!(
+        control.inspect().counters,
+        netplane::ControllerCounters::default()
+    );
+    assert_eq!(
         control.inspect().active.ok_or("missing active")?.id,
         initial
     );
@@ -252,6 +266,7 @@ async fn invalid_candidate_and_shutdown_without_poll() -> TestResult {
         control.rollback_if_current(token, initial),
         Err(ControllerError::ShuttingDown)
     );
+    assert_eq!(control.inspect().counters.rejected_total, 2);
     assert!(control.handle().try_execute(0).is_err());
     assert!(drain.await.is_err());
     drop(held);
@@ -343,6 +358,7 @@ async fn stale_rollback_and_zero_history_preserve_active() -> TestResult {
         published.published
     );
     assert_eq!(control.handle().execute(0).await?, 2);
+    assert_eq!(control.inspect().counters.rejected_total, 2);
     Ok(())
 }
 

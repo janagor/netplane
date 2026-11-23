@@ -77,6 +77,17 @@ pub struct StatusView {
     pub retained_count: usize,
     pub last_publication: Option<OutcomeView>,
     pub runtime: RuntimeView,
+    pub counters: CountersView,
+}
+
+#[derive(Serialize)]
+pub struct CountersView {
+    #[serde(rename = "replacements_total")]
+    pub replacements: u64,
+    #[serde(rename = "rollbacks_total")]
+    pub rollbacks: u64,
+    #[serde(rename = "rejected_total")]
+    pub rejected: u64,
 }
 
 #[derive(Serialize)]
@@ -84,6 +95,9 @@ pub struct RuntimeView {
     pub lifecycle: &'static str,
     pub outstanding: usize,
     pub max_outstanding: usize,
+    pub admitted_total: u64,
+    pub rejected_at_capacity_total: u64,
+    pub rejected_closed_total: u64,
 }
 
 #[derive(Debug)]
@@ -182,6 +196,11 @@ impl GatewayControl {
             retained_count: retained.len(),
             retained,
             last_publication: snapshot.last_outcome.map(Into::into),
+            counters: CountersView {
+                replacements: snapshot.counters.replacements_total,
+                rollbacks: snapshot.counters.rollbacks_total,
+                rejected: snapshot.counters.rejected_total,
+            },
             runtime: RuntimeView {
                 lifecycle: match runtime.lifecycle {
                     LifecycleState::Running => "running",
@@ -190,6 +209,9 @@ impl GatewayControl {
                 },
                 outstanding: runtime.outstanding,
                 max_outstanding: runtime.max_outstanding,
+                admitted_total: runtime.admitted_total,
+                rejected_at_capacity_total: runtime.rejected_at_capacity_total,
+                rejected_closed_total: runtime.rejected_closed_total,
             },
         })
     }

@@ -31,6 +31,8 @@ async fn external_consumer_can_route_reconfigure_and_drain()
         },
     );
     let handle = controller.handle();
+    let counters: netplane::ControllerCounters = controller.inspect().counters;
+    assert_eq!(counters, netplane::ControllerCounters::default());
     let old = handle.try_execute(1)?;
     assert!(matches!(
         handle.try_execute(2),
@@ -70,5 +72,11 @@ async fn external_consumer_can_route_reconfigure_and_drain()
     assert_eq!(handle.execute(1).await?, 2);
     controller.shutdown(Duration::from_secs(1)).await?;
     assert!(matches!(handle.try_execute(1), Err(AdmissionError::Closed)));
+    let status = handle.status();
+    assert_eq!(status.admitted_total, 3);
+    assert_eq!(status.rejected_at_capacity_total, 1);
+    assert_eq!(status.rejected_closed_total, 1);
+    assert_eq!(controller.inspect().counters.replacements_total, 1);
+    assert_eq!(controller.inspect().counters.rollbacks_total, 1);
     Ok(())
 }

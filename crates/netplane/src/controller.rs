@@ -46,6 +46,20 @@ pub struct VersionSnapshot {
     pub metadata: GraphMetadata,
 }
 
+/// Cumulative controller operation totals, saturating at `u64::MAX`.
+///
+/// Counts only attempts through conditional publication and rollback. Initial
+/// publication, direct runtime publication, and candidate validation are excluded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ControllerCounters {
+    /// Successful replacement publications.
+    pub replacements_total: u64,
+    /// Successful rollback publications.
+    pub rollbacks_total: u64,
+    /// Failed conditional publication or rollback attempts, counted once each.
+    pub rejected_total: u64,
+}
+
 /// A coherent controller inspection result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ControllerSnapshot {
@@ -57,6 +71,8 @@ pub struct ControllerSnapshot {
     pub retained: Vec<VersionSnapshot>,
     /// Last successful controller publication.
     pub last_outcome: Option<ReconfigurationOutcome>,
+    /// Totals sampled with publication metadata under the same control lock.
+    pub counters: ControllerCounters,
 }
 
 /// Kind of successful publication.
@@ -112,6 +128,7 @@ struct ControllerState<Request: Send, Response> {
     history: VecDeque<Arc<PublishedVersion<Request, Response>>>,
     limit: usize,
     last_outcome: Option<ReconfigurationOutcome>,
+    counters: ControllerCounters,
 }
 
 /// Concurrency-safe owner of one Netplane publisher.
@@ -137,6 +154,7 @@ where
                 history: VecDeque::new(),
                 limit: options.max_retained_versions,
                 last_outcome: None,
+                counters: ControllerCounters::default(),
             }),
             handle,
         }
@@ -194,6 +212,7 @@ where
                 .map(|version| snapshot(version))
                 .collect(),
             last_outcome: state.last_outcome,
+            counters: state.counters,
         }
     }
 
@@ -241,6 +260,9 @@ where
                 PublicationKind::Rollback { source: target },
             )
         })();
+        if result.is_err() {
+            state.counters.rejected_total = state.counters.rejected_total.saturating_add(1);
+        }
         let runtime_id = state.runtime.runtime_id;
         let actual = state.runtime.active_version_id();
         drop(state);
@@ -258,6 +280,9 @@ where
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = check(&state, expected).and_then(|()| publish_locked(&mut state, graph, kind));
+        if result.is_err() {
+            state.counters.rejected_total = state.counters.rejected_total.saturating_add(1);
+        }
         let runtime_id = state.runtime.runtime_id;
         let actual = state.runtime.active_version_id();
         drop(state);
@@ -445,6 +470,11 @@ where
     };
     state.history.push_back(previous);
     state.last_outcome = Some(outcome);
+    let total = match kind {
+        PublicationKind::Replacement => &mut state.counters.replacements_total,
+        PublicationKind::Rollback { .. } => &mut state.counters.rollbacks_total,
+    };
+    *total = total.saturating_add(1);
     let mut evicted = Vec::new();
     while state.history.len() > state.limit {
         if let Some(version) = state.history.pop_front() {

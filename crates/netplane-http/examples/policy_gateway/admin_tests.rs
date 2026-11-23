@@ -155,6 +155,12 @@ async fn admin_authentication_and_json_errors() -> Result<(), BoxError> {
     let status: serde_json::Value = serde_json::from_slice(&body)?;
     assert_eq!(status["runtime"]["lifecycle"], "running");
     assert_eq!(status["runtime"]["outstanding"], 0);
+    assert_eq!(status["runtime"]["admitted_total"], 0);
+    assert_eq!(status["runtime"]["rejected_at_capacity_total"], 0);
+    assert_eq!(status["runtime"]["rejected_closed_total"], 0);
+    assert_eq!(status["counters"]["replacements_total"], 0);
+    assert_eq!(status["counters"]["rollbacks_total"], 0);
+    assert_eq!(status["counters"]["rejected_total"], 0);
     assert_eq!(
         status["runtime"]["max_outstanding"],
         GatewayConfig::default().runtime_limits.max_outstanding
@@ -322,6 +328,7 @@ async fn verify_live_flow(
     let published_status = wire_request(admin_port, "GET", "/status", token, "").await?;
     let published_view: serde_json::Value = serde_json::from_slice(published_status.body())?;
     assert_eq!(published_view["runtime"]["outstanding"], 1);
+    assert_eq!(published_view["counters"]["replacements_total"], 1);
     assert_eq!(
         wire_request(public_port, "POST", "/process", None, "hello")
             .await?
@@ -340,6 +347,7 @@ async fn verify_live_flow(
     let rolled_status = wire_request(admin_port, "GET", "/status", token, "").await?;
     let rolled_view: serde_json::Value = serde_json::from_slice(rolled_status.body())?;
     assert_eq!(rolled_view["runtime"]["outstanding"], 1);
+    assert_eq!(rolled_view["counters"]["rollbacks_total"], 1);
     gate.release.notify_one();
     let held_response = held.await??;
     assert_eq!(held_response.headers()["x-backend"], "stable");
