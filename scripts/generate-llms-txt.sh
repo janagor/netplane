@@ -49,6 +49,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - ReconfigurationController publication, rollback history, and structured runtime tracing.
 - Optional netplane-http adapter with bounded body ingress and live listener reconfiguration.
 - Optional netplane-control typed desired-state reconciliation with single-flight preparation and explicit publication conflicts.
+- Optional netplane-kubernetes namespace-scoped Service and EndpointSlice discovery with immutable snapshots.
 
 ## Limits and planned work
 
@@ -62,6 +63,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - [crates/netplane](crates/netplane/): Public runtime library; transport and deployment independent.
 - [crates/netplane-http](crates/netplane-http/): Optional HTTP adapter; depends on the core runtime.
 - [crates/netplane-control](crates/netplane-control/): Optional typed reconciliation; depends on the core runtime.
+- [crates/netplane-kubernetes](crates/netplane-kubernetes/): Optional topology discovery; independent of runtime and control.
 - [docs/control-plane.md](docs/control-plane.md): Desired-state reconciliation contract.
 - [docs/control-plane-observability.md](docs/control-plane-observability.md): Reconciliation snapshots and audit events.
 - [crates/xtask](crates/xtask/): Development tooling; never a runtime dependency.

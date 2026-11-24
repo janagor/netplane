@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/netplane", "crates/netplane-http", "crates/netplane-control", "crates/xtask"]
+members = ["crates/netplane", "crates/netplane-http", "crates/netplane-control", "crates/xtask", "crates/netplane-kubernetes"]
 default-members = ["crates/netplane"]
 resolver = "3"
 exclude = ["fuzz"]
@@ -84,6 +84,9 @@ cognitive_complexity = "allow"
 
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
+kube = { version = "~4.0.0", default-features = false, features = ["client", "runtime", "rustls-tls", "ring"] }
+k8s-openapi = { version = "0.28", features = ["v1_32"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 tracing = "0.1"
 axum = "0.8"

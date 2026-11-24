@@ -22,6 +22,7 @@
 - ReconfigurationController publication, rollback history, and structured runtime tracing.
 - Optional netplane-http adapter with bounded body ingress and live listener reconfiguration.
 - Optional netplane-control typed desired-state reconciliation with single-flight preparation and explicit publication conflicts.
+- Optional netplane-kubernetes namespace-scoped Service and EndpointSlice discovery with immutable snapshots.
 
 ## Limits and planned work
 
@@ -35,6 +36,7 @@
 - [crates/netplane](crates/netplane/): Public runtime library; transport and deployment independent.
 - [crates/netplane-http](crates/netplane-http/): Optional HTTP adapter; depends on the core runtime.
 - [crates/netplane-control](crates/netplane-control/): Optional typed reconciliation; depends on the core runtime.
+- [crates/netplane-kubernetes](crates/netplane-kubernetes/): Optional topology discovery; independent of runtime and control.
 - [docs/control-plane.md](docs/control-plane.md): Desired-state reconciliation contract.
 - [docs/control-plane-observability.md](docs/control-plane-observability.md): Reconciliation snapshots and audit events.
 - [crates/xtask](crates/xtask/): Development tooling; never a runtime dependency.
@@ -253,6 +255,7 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 | `crates/netplane` | Public, transport-independent runtime library. Keep its public dependency surface small. |
 | `crates/netplane-http` | Optional bounded HTTP ingress and Axum listener integration; depends on `netplane`. |
 | `crates/netplane-control` | Optional typed desired-state reconciliation; depends on `netplane`. |
+| `crates/netplane-kubernetes` | Optional namespace-scoped topology discovery; independent of runtime and control. |
 | `crates/xtask` | Build and quality automation. Never a runtime dependency of `netplane`. |
 | `docs/adr` | Accepted architectural decisions and their consequences. |
 
@@ -269,6 +272,8 @@ retries classified failures with capped backoff, and discards superseded candida
 [Reconciliation status and audit events](control-plane-observability.md) expose
 desired and applied revisions independently of runtime publication generations.
 Execution remains unchanged.
+
+The optional [`netplane-kubernetes`](../crates/netplane-kubernetes/README.md) crate observes Services and EndpointSlices through caller-owned watchers. It publishes immutable, normalized topology snapshots after complete per-collection initialization and relisting. Discovery is eventually consistent across resource collections and does not prepare or publish executable graphs.
 
 ## Current limits and future work
 

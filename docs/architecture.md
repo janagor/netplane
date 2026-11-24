@@ -22,6 +22,7 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 | `crates/netplane` | Public, transport-independent runtime library. Keep its public dependency surface small. |
 | `crates/netplane-http` | Optional bounded HTTP ingress and Axum listener integration; depends on `netplane`. |
 | `crates/netplane-control` | Optional typed desired-state reconciliation; depends on `netplane`. |
+| `crates/netplane-kubernetes` | Optional namespace-scoped topology discovery; independent of runtime and control. |
 | `crates/xtask` | Build and quality automation. Never a runtime dependency of `netplane`. |
 | `docs/adr` | Accepted architectural decisions and their consequences. |
 
@@ -38,6 +39,8 @@ retries classified failures with capped backoff, and discards superseded candida
 [Reconciliation status and audit events](control-plane-observability.md) expose
 desired and applied revisions independently of runtime publication generations.
 Execution remains unchanged.
+
+The optional [`netplane-kubernetes`](../crates/netplane-kubernetes/README.md) crate observes Services and EndpointSlices through caller-owned watchers. It publishes immutable, normalized topology snapshots after complete per-collection initialization and relisting. Discovery is eventually consistent across resource collections and does not prepare or publish executable graphs.
 
 ## Current limits and future work
 
