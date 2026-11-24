@@ -80,13 +80,22 @@ and resources retained independently by applications remain application limits.
 
 Only one preparation runs. A newer input does not cancel an active preparation;
 the worker awaits completion and discards an obsolete candidate before conditional
-publication. The last valid runtime graph remains available on failure. Submission
-and publication are separate operations: an update racing after the final freshness
-check can arrive as the previous candidate publishes, then gets reconciled next.
-Driver shutdown can race in that same interval: it closes update admission but
-cannot prevent publication that has already passed the freshness check. Awaiting
-worker completion guarantees that no further driver publications can occur.
-No watch borrow or controller lock crosses an await or publication callback.
+publication. The last valid runtime graph remains available on failure.
+
+`UpdateSender::invalidate_pending()` advances the shared sequence and withdraws
+pending desired work without stopping the driver. It reports `Invalidated(sequence)`
+through driver status and `Blocked` with failure `Invalidated` through reconciliation
+status. It does not invent an applied revision or change the active graph. Recovery
+requires a new submission, including when the desired state compares equal.
+
+The final freshness check returns a mailbox read guard that the controller retains
+through its atomic swap. Submissions, invalidation and driver shutdown acquire the
+mailbox's write lock. If a swap wins first, its graph remains active; after invalidation
+or shutdown returns, no earlier candidate can commit. This closes the former gap
+between freshness checking and publication. Preparation and retry remain single-flight
+and may finish before their withdrawn resources are dropped. Await the worker to
+confirm cleanup. No mailbox guard or controller lock crosses an await, tracing
+callback or displaced-resource cleanup; the lock order is mailbox then controller.
 
 Defaults are a 100 ms quiet period, a one-second maximum coalescing window, and
 exponential retry delays from 100 ms up to five seconds, with deterministic local
@@ -112,8 +121,8 @@ reports the latest preparation, success, typed failure and optional retry delay,
 or graceful stop; it is not an audit stream. `UpdateSender::shutdown()` closes
 input immediately. Await the worker to confirm cleanup: active preparation is
 allowed to finish before the worker exits, so uncooperative preparation can delay
-graceful shutdown indefinitely. Candidates that have not passed the final freshness
-check are discarded. Dropping all producers also stops the worker. For forced
+graceful shutdown indefinitely. Earlier candidates cannot commit after shutdown
+returns, although a prior completed swap remains active. Dropping all producers also stops the worker. For forced
 cancellation, drop the worker future, or abort and join its task. This drops
 preparation according to the preparer's cancellation contract. There are no independently spawned worker tasks or retry timers.
 Driver shutdown does not shut down the runtime or disrupt accepted requests.
@@ -125,4 +134,5 @@ coalescing windows, and shutdown during preparation or retry.
 
 Read [reconciliation observability](control-plane-observability.md) for consistent
 desired/applied revision snapshots, bounded status subscriptions, and structured
-audit events. Discovery integrations remain future extensions.
+audit events. The Kubernetes adapter uses coherent discovery observations and
+invalidation to hold the active graph while discovery is unhealthy or invalid.

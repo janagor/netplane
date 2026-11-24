@@ -16,6 +16,8 @@ use crate::{
 pub enum DriverStatus<E> {
     /// Waiting for the first desired state.
     Idle,
+    /// Pending work was withdrawn; waiting for a new desired state.
+    Invalidated(u64),
     /// Validating or preparing this local sequence.
     Preparing(u64),
     /// This sequence completed successfully at the reported publication.
@@ -40,10 +42,10 @@ pub enum DriverStatus<E> {
 /// for active preparation to finish and can wait indefinitely for an uncooperative
 /// preparer. For forced cancellation, drop the `run` future, or abort and join its
 /// task; this drops preparation following [`GraphPreparer`]'s cleanup contract.
-/// Shutdown closes update admission, but a publication that already passed its
-/// final freshness check can still commit. Await worker completion to ensure no
-/// further driver publication is possible. No child task or timer survives
-/// that drop. Independently spawned application work remains its responsibility.
+/// Shutdown and invalidation serialize with the atomic publication step. A swap
+/// that completed first remains active; after either operation returns, an earlier
+/// candidate cannot commit. Await worker completion to ensure cleanup is finished.
+/// No child task or timer survives that drop. Independently spawned application work remains its responsibility.
 pub struct ReconciliationDriver<D, P, Request, Response>
 where
     P: GraphPreparer<D, Request, Response>,
@@ -78,6 +80,7 @@ where
         policy.validate()?;
         let stopped = reconciler.status().phase == crate::ReconciliationPhase::Stopped;
         let (sender, updates) = watch::channel(Mailbox {
+            sequence: 0,
             update: None,
             stopped,
         });
@@ -127,6 +130,25 @@ where
             .is_some_and(|latest| latest.sequence == sequence)
     }
 
+    fn current_guard(&self, sequence: u64) -> Option<watch::Ref<'_, Mailbox<D>>> {
+        let mailbox = self.updates.borrow();
+        (!mailbox.stopped && mailbox.sequence == sequence && mailbox.update.is_some())
+            .then_some(mailbox)
+    }
+
+    fn latest(&mut self, completed: &mut u64) -> Option<Arc<crate::DesiredUpdate<D>>> {
+        let (update, sequence) = {
+            let mailbox = self.updates.borrow_and_update();
+            (mailbox.update.clone(), mailbox.sequence)
+        };
+        if update.is_none() && sequence != *completed {
+            self.status
+                .send_replace(Arc::new(DriverStatus::Invalidated(sequence)));
+            *completed = sequence;
+        }
+        update
+    }
+
     async fn coalesce(&mut self) -> bool {
         let deadline = Instant::now() + self.policy.max_coalesce_window;
         loop {
@@ -158,7 +180,7 @@ where
             if self.stopped() {
                 break;
             }
-            let update = self.updates.borrow_and_update().update.clone();
+            let update = self.latest(&mut completed);
             let Some(_) = update.filter(|update| update.sequence != completed) else {
                 if self.updates.changed().await.is_err() {
                     break;
@@ -185,12 +207,10 @@ where
                     .send_replace(Arc::new(DriverStatus::Preparing(sequence)));
                 let result = self
                     .reconciler
-                    .apply_checked(update.desired.clone(), || {
-                        !self.stopped() && self.is_current(sequence)
-                    })
+                    .apply_checked(update.desired.clone(), || self.current_guard(sequence))
                     .await;
-                // Record a successful commit even if a newer update won the race
-                // after the final freshness check. It never makes the newer state idle.
+                // A producer can update after the atomic swap but before event delivery.
+                // Record that commit without making the newer desired revision idle.
                 if result.is_ok() {
                     observation.finish(sequence, &result, false);
                 } else if !self.is_current(sequence) || self.stopped() {

@@ -253,9 +253,9 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 | Path | Responsibility |
 | --- | --- |
 | `crates/netplane` | Public, transport-independent runtime library. Keep its public dependency surface small. |
-| `crates/netplane-http` | Optional bounded HTTP ingress and Axum listener integration; depends on `netplane`. |
+| `crates/netplane-http` | Optional bounded HTTP ingress, outbound forwarding and Axum listener integration; depends on `netplane`. |
 | `crates/netplane-control` | Optional typed desired-state reconciliation; depends on `netplane`. |
-| `crates/netplane-kubernetes` | Optional namespace-scoped topology discovery; independent of runtime and control. |
+| `crates/netplane-kubernetes` | Optional namespace-scoped discovery and explicit endpoint translation; depends on runtime, control and HTTP adapters. |
 | `crates/xtask` | Build and quality automation. Never a runtime dependency of `netplane`. |
 | `docs/adr` | Accepted architectural decisions and their consequences. |
 
@@ -273,7 +273,41 @@ retries classified failures with capped backoff, and discards superseded candida
 desired and applied revisions independently of runtime publication generations.
 Execution remains unchanged.
 
-The optional [`netplane-kubernetes`](../crates/netplane-kubernetes/README.md) crate observes Services and EndpointSlices through caller-owned watchers. It publishes immutable, normalized topology snapshots after complete per-collection initialization and relisting. Discovery is eventually consistent across resource collections and does not prepare or publish executable graphs.
+The optional [`netplane-kubernetes`](../crates/netplane-kubernetes/README.md) crate observes Services and EndpointSlices through caller-owned watchers. It publishes immutable, normalized topology snapshots after complete per-collection initialization and relisting. Discovery is eventually consistent across resource collections. An explicit `ServiceBinding`
+opts one Service into translation. `translate` resolves a Service port to normalized
+TCP destinations using actual EndpointSlice ports, filters readiness and termination,
+and includes Service and known Pod UIDs in semantic identity. Slice names, resource
+versions and unrelated metadata do not participate in desired-state equality.
+
+`KubernetesIntegration` forwards healthy complete snapshots to the existing
+`ReconciliationDriver` using one coherent local `DiscoveryObservation`; it adds no
+publication mechanism or event task scheduler. Unhealthy and rejected observations
+invalidate pending candidates. The controller retains the driver's freshness guard
+through the atomic swap, so candidates withdrawn before that swap cannot publish.
+A publication that completes before invalidation remains active. Recovery resubmits
+the latest valid observation; preparation cleanup can finish after invalidation.
+Observation delivery coalesces intermediate values. A disconnect and recovery missed
+by the bridge at an unchanged topology revision does not invalidate its candidate.
+The freeze guarantee begins when the bridge processes a degraded or rejected
+observation, rather than when discovery produces one.
+`HttpGraphPreparer` uses ordinary bounded `GraphBuilder` backends and the core
+`UniformRouting` policy. FNV-1a modulo the ordered endpoint count supplies equal-weight
+selection for any positive backend count using a caller-provided key. An authoritative
+empty topology compiles to a bounded Tower root returning typed `Unavailable`, mapped
+to HTTP 503. API recovery, partial relists and invalid candidates retain the active
+graph. `publishNotReadyAddresses` is explicitly rejected.
+
+HTTP clients and connection pools are version-local. Execution workers and queues
+are never shared between versions. This safely isolates known Pod replacement at a
+reused IP; a removed endpoint's old pool remains usable by accepted requests and
+bounded rollback history. Idle pools expire after 30 seconds and retain at most eight
+connections per destination. `UpstreamLimits::max_backends` bounds workers per
+candidate; runtime-wide admission and each backend's concurrency/queue capacity still
+apply. Applications must bound HTTP request bodies at ingress. No retry, active
+health check or Kubernetes API call occurs during request execution. Applications
+cancel discovery and its integration alongside runtime shutdown and await their
+caller-owned tasks, as shown in `discovered_gateway`. A retained graph cannot ensure
+a physically terminated Pod remains reachable.
 
 ## Current limits and future work
 
@@ -421,13 +455,22 @@ and resources retained independently by applications remain application limits.
 
 Only one preparation runs. A newer input does not cancel an active preparation;
 the worker awaits completion and discards an obsolete candidate before conditional
-publication. The last valid runtime graph remains available on failure. Submission
-and publication are separate operations: an update racing after the final freshness
-check can arrive as the previous candidate publishes, then gets reconciled next.
-Driver shutdown can race in that same interval: it closes update admission but
-cannot prevent publication that has already passed the freshness check. Awaiting
-worker completion guarantees that no further driver publications can occur.
-No watch borrow or controller lock crosses an await or publication callback.
+publication. The last valid runtime graph remains available on failure.
+
+`UpdateSender::invalidate_pending()` advances the shared sequence and withdraws
+pending desired work without stopping the driver. It reports `Invalidated(sequence)`
+through driver status and `Blocked` with failure `Invalidated` through reconciliation
+status. It does not invent an applied revision or change the active graph. Recovery
+requires a new submission, including when the desired state compares equal.
+
+The final freshness check returns a mailbox read guard that the controller retains
+through its atomic swap. Submissions, invalidation and driver shutdown acquire the
+mailbox's write lock. If a swap wins first, its graph remains active; after invalidation
+or shutdown returns, no earlier candidate can commit. This closes the former gap
+between freshness checking and publication. Preparation and retry remain single-flight
+and may finish before their withdrawn resources are dropped. Await the worker to
+confirm cleanup. No mailbox guard or controller lock crosses an await, tracing
+callback or displaced-resource cleanup; the lock order is mailbox then controller.
 
 Defaults are a 100 ms quiet period, a one-second maximum coalescing window, and
 exponential retry delays from 100 ms up to five seconds, with deterministic local
@@ -453,8 +496,8 @@ reports the latest preparation, success, typed failure and optional retry delay,
 or graceful stop; it is not an audit stream. `UpdateSender::shutdown()` closes
 input immediately. Await the worker to confirm cleanup: active preparation is
 allowed to finish before the worker exits, so uncooperative preparation can delay
-graceful shutdown indefinitely. Candidates that have not passed the final freshness
-check are discarded. Dropping all producers also stops the worker. For forced
+graceful shutdown indefinitely. Earlier candidates cannot commit after shutdown
+returns, although a prior completed swap remains active. Dropping all producers also stops the worker. For forced
 cancellation, drop the worker future, or abort and join its task. This drops
 preparation according to the preparer's cancellation contract. There are no independently spawned worker tasks or retry timers.
 Driver shutdown does not shut down the runtime or disrupt accepted requests.
@@ -466,7 +509,8 @@ coalescing windows, and shutdown during preparation or retry.
 
 Read [reconciliation observability](control-plane-observability.md) for consistent
 desired/applied revision snapshots, bounded status subscriptions, and structured
-audit events. Discovery integrations remain future extensions.
+audit events. The Kubernetes adapter uses coherent discovery observations and
+invalidation to hold the active graph while discovery is unhealthy or invalid.
 
 ## Source: docs/control-plane-observability.md
 
@@ -497,7 +541,7 @@ the single-flight permit; a busy call does not replace the desired revision.
 An unpolled call is not yet accepted. Revision exhaustion rejects new work.
 Moving a previously used reconciler into a driver preserves revision numbering.
 
-`desired_revision` identifies the latest accepted submission, even during
+`desired_revision` identifies the latest accepted submission or invalidation, even during
 coalescing or another candidate's preparation. `applied_revision` identifies the
 last successful publication or equivalent-state deduplication. Coalesced or
 superseded updates do not acquire fabricated applied records.
@@ -524,12 +568,18 @@ and executable graph. Failure categories contain no application error strings.
 The existing `ApplyError` and `DriverStatus` retain typed errors for applications.
 
 A new submission during preparation immediately becomes the desired revision.
-The older completion cannot change that revision or make it idle. Publication can
-race after the driver's existing final freshness check: a successful older commit
-is recorded as applied while the newest desired revision remains pending.
+The older completion cannot change that revision or make it idle. Freshness checking
+and publication retain the same mailbox read guard through the atomic swap. A newer
+submission or invalidation can arrive after that swap and before its success event;
+that successful older commit is recorded without marking newer work idle.
+
+Invalidation advances the desired revision, enters `Blocked` with failure
+`Invalidated`, and preserves the applied revision and active publication. Driver
+status becomes `Invalidated(sequence)` after the prior attempt finishes. Recovery
+requires a new submission. After invalidation or shutdown returns, no earlier
+candidate can commit; a swap that completed first remains active.
 Shutdown closes update admission immediately; `Stopped` means worker cleanup has
-completed. Await the worker to rule out further publication, including a commit
-that already passed its freshness check. Dropping an unused driver or aborting
+completed. Await the worker to confirm cleanup. Dropping an unused driver or aborting
 and joining its run task also reports `Stopped`. Dropping an explicit application
 future during preparation records `Blocked` with `Cancelled` and releases its
 permit; subsequent explicit application can recover.
@@ -547,6 +597,7 @@ Tracing target `netplane_control` emits these typed transitions:
 | Event | Level |
 | --- | --- |
 | `reconcile.desired_updated` | INFO |
+| `reconcile.invalidated` | WARN |
 | `reconcile.started` | DEBUG |
 | `reconcile.applied` | INFO |
 | `reconcile.unchanged` | DEBUG |
@@ -756,6 +807,17 @@ Applications need concurrent administrative callers to replace and inspect a run
 Published wrappers share an `Arc<GraphVersion>`. A rollback takes the executable graph from retained history and publishes a new wrapper with a fresh generation. It therefore preserves Tower service state, readiness ownership, and request lifetimes. Controller history retains at most the configured number of displaced publications in publication order. A zero limit disables rollback. In-flight requests may keep evicted versions alive.
 
 Shutdown closes admission while holding the control mutex, clears history, and returns the runtime's drain future. A timeout remains retryable, but rollback history is never restored. Inspection reads active ID, graph metadata, and the matching token from the same loaded publication. Controller publication and shutdown events are emitted after releasing the control mutex so subscriber callbacks may inspect the controller.
+
+## Reconciliation invalidation
+
+The optional control driver checks its input mailbox under a read guard and passes
+that guard to `publish_if_current_guarded`. The controller drops it after the atomic
+swap and controller unlock, before tracing callbacks and displaced-version cleanup.
+Producers serialize submission, invalidation and shutdown through the mailbox write
+lock. Thus an earlier candidate cannot commit after invalidation returns; a swap
+that completed first remains active. The order is mailbox then controller, with no
+lock held across preparation awaits. Core remains independent of reconciliation
+schemas and discovery systems.
 
 ## Consequences
 

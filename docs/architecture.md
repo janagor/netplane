@@ -20,9 +20,9 @@ Netplane is a Rust library for dynamically reconfigurable Tower service composit
 | Path | Responsibility |
 | --- | --- |
 | `crates/netplane` | Public, transport-independent runtime library. Keep its public dependency surface small. |
-| `crates/netplane-http` | Optional bounded HTTP ingress and Axum listener integration; depends on `netplane`. |
+| `crates/netplane-http` | Optional bounded HTTP ingress, outbound forwarding and Axum listener integration; depends on `netplane`. |
 | `crates/netplane-control` | Optional typed desired-state reconciliation; depends on `netplane`. |
-| `crates/netplane-kubernetes` | Optional namespace-scoped topology discovery; independent of runtime and control. |
+| `crates/netplane-kubernetes` | Optional namespace-scoped discovery and explicit endpoint translation; depends on runtime, control and HTTP adapters. |
 | `crates/xtask` | Build and quality automation. Never a runtime dependency of `netplane`. |
 | `docs/adr` | Accepted architectural decisions and their consequences. |
 
@@ -40,7 +40,41 @@ retries classified failures with capped backoff, and discards superseded candida
 desired and applied revisions independently of runtime publication generations.
 Execution remains unchanged.
 
-The optional [`netplane-kubernetes`](../crates/netplane-kubernetes/README.md) crate observes Services and EndpointSlices through caller-owned watchers. It publishes immutable, normalized topology snapshots after complete per-collection initialization and relisting. Discovery is eventually consistent across resource collections and does not prepare or publish executable graphs.
+The optional [`netplane-kubernetes`](../crates/netplane-kubernetes/README.md) crate observes Services and EndpointSlices through caller-owned watchers. It publishes immutable, normalized topology snapshots after complete per-collection initialization and relisting. Discovery is eventually consistent across resource collections. An explicit `ServiceBinding`
+opts one Service into translation. `translate` resolves a Service port to normalized
+TCP destinations using actual EndpointSlice ports, filters readiness and termination,
+and includes Service and known Pod UIDs in semantic identity. Slice names, resource
+versions and unrelated metadata do not participate in desired-state equality.
+
+`KubernetesIntegration` forwards healthy complete snapshots to the existing
+`ReconciliationDriver` using one coherent local `DiscoveryObservation`; it adds no
+publication mechanism or event task scheduler. Unhealthy and rejected observations
+invalidate pending candidates. The controller retains the driver's freshness guard
+through the atomic swap, so candidates withdrawn before that swap cannot publish.
+A publication that completes before invalidation remains active. Recovery resubmits
+the latest valid observation; preparation cleanup can finish after invalidation.
+Observation delivery coalesces intermediate values. A disconnect and recovery missed
+by the bridge at an unchanged topology revision does not invalidate its candidate.
+The freeze guarantee begins when the bridge processes a degraded or rejected
+observation, rather than when discovery produces one.
+`HttpGraphPreparer` uses ordinary bounded `GraphBuilder` backends and the core
+`UniformRouting` policy. FNV-1a modulo the ordered endpoint count supplies equal-weight
+selection for any positive backend count using a caller-provided key. An authoritative
+empty topology compiles to a bounded Tower root returning typed `Unavailable`, mapped
+to HTTP 503. API recovery, partial relists and invalid candidates retain the active
+graph. `publishNotReadyAddresses` is explicitly rejected.
+
+HTTP clients and connection pools are version-local. Execution workers and queues
+are never shared between versions. This safely isolates known Pod replacement at a
+reused IP; a removed endpoint's old pool remains usable by accepted requests and
+bounded rollback history. Idle pools expire after 30 seconds and retain at most eight
+connections per destination. `UpstreamLimits::max_backends` bounds workers per
+candidate; runtime-wide admission and each backend's concurrency/queue capacity still
+apply. Applications must bound HTTP request bodies at ingress. No retry, active
+health check or Kubernetes API call occurs during request execution. Applications
+cancel discovery and its integration alongside runtime shutdown and await their
+caller-owned tasks, as shown in `discovered_gateway`. A retained graph cannot ensure
+a physically terminated Pod remains reachable.
 
 ## Current limits and future work
 

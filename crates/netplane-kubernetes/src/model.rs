@@ -43,6 +43,8 @@ pub struct EndpointConditions {
 /// Concrete IP destination, including ineligible endpoints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredEndpoint {
+    /// Target object UID when supplied, distinguishing Pod replacement.
+    pub target_uid: Option<String>,
     /// IPv4 or IPv6 address.
     pub address: IpAddr,
     /// Actual destination port.
@@ -83,6 +85,18 @@ pub struct DiscoverySnapshot {
     pub revision: u64,
     /// Services in deterministic order.
     pub services: BTreeMap<ServiceKey, DiscoveredService>,
+}
+/// One coherent local discovery observation, independent of cross-resource transactions.
+///
+/// Snapshot and health are captured after processing the same watcher event. An
+/// unhealthy observation retains the latest complete snapshot, which may include
+/// updates from the other watcher. `latest_revision` always matches its snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryObservation {
+    /// Latest complete snapshot, absent before both initial listings complete.
+    pub snapshot: Option<std::sync::Arc<DiscoverySnapshot>>,
+    /// Watcher states captured together with this snapshot.
+    pub status: DiscoveryStatus,
 }
 /// State of an individual resource watcher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

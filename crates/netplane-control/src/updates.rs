@@ -11,6 +11,7 @@ pub struct DesiredUpdate<D> {
 }
 
 pub struct Mailbox<D> {
+    pub sequence: u64,
     pub update: Option<Arc<DesiredUpdate<D>>>,
     pub stopped: bool,
 }
@@ -41,34 +42,59 @@ impl<D> UpdateSender<D> {
     /// Returns an error after shutdown, worker drop, or sequence exhaustion.
     /// A previously stopped reconciler cannot accept updates through a new driver.
     pub fn submit(&self, desired: D) -> Result<u64, UpdateError> {
+        self.replace(Some(desired))
+    }
+
+    /// Supersede all pending/preparing candidates without stopping the driver.
+    ///
+    /// Advances the shared sequence and clears desired work. Publication holds a
+    /// read guard on this mailbox through the atomic swap: after this call returns,
+    /// no earlier candidate can commit. A swap already completed before invalidation
+    /// remains active. Recovery requires a new `submit`, even for equal desired state.
+    /// Preparation may finish before its candidate is discarded; no extra task is
+    /// spawned. The active graph and accepted requests are unaffected.
+    ///
+    /// # Errors
+    /// Returns an error after shutdown/driver drop or on sequence exhaustion.
+    pub fn invalidate_pending(&self) -> Result<u64, UpdateError> {
+        self.replace(None)
+    }
+
+    fn replace(&self, desired: Option<D>) -> Result<u64, UpdateError> {
         if self.0.is_closed() {
             return Err(UpdateError::Stopped);
         }
         let mut result = Err(UpdateError::Stopped);
         let mut event = None;
+        let mut retired = None;
         self.0.send_if_modified(|mailbox| {
             let status = self.1.status();
             if mailbox.stopped || status.phase == crate::ReconciliationPhase::Stopped {
                 return false;
             }
-            let previous = mailbox
-                .update
-                .as_ref()
-                .map_or(status.desired_revision.unwrap_or(0), |update| {
-                    update.sequence
-                });
+            let previous = mailbox.sequence.max(status.desired_revision.unwrap_or(0));
             let Some(sequence) = previous.checked_add(1) else {
                 result = Err(UpdateError::SequenceExhausted);
                 return false;
             };
-            mailbox.update = Some(Arc::new(DesiredUpdate { sequence, desired }));
-            event = Some(self.1.desired(sequence));
+            mailbox.sequence = sequence;
+            let invalidated = desired.is_none();
+            retired = std::mem::replace(
+                &mut mailbox.update,
+                desired.map(|desired| Arc::new(DesiredUpdate { sequence, desired })),
+            );
+            event = Some(if invalidated {
+                self.1.invalidated(sequence)
+            } else {
+                self.1.desired(sequence)
+            });
             result = Ok(sequence);
             true
         });
         if let Some(event) = event {
             event.emit();
         }
+        drop(retired); // Application-owned configuration cleanup runs outside the mailbox lock.
         result
     }
 
@@ -88,7 +114,8 @@ impl<D> UpdateSender<D> {
     ///
     /// Active preparation is allowed to finish before its candidate is discarded;
     /// an uncooperative preparer can delay shutdown indefinitely. Publication that
-    /// already passed the final freshness check may still commit after this call.
+    /// completed its atomic swap remains active; no earlier candidate can commit
+    /// after this call returns.
     /// Await the worker future or its join handle to confirm completed cleanup.
     /// For forced cancellation, drop the worker future, or abort and join its task;
     /// preparation cleanup then follows [`crate::GraphPreparer`]'s contract.
@@ -107,6 +134,7 @@ mod tests {
     #[test]
     fn stopped_observation_rejects_submission_even_if_mailbox_is_open() {
         let (sender, receiver) = watch::channel(Mailbox {
+            sequence: 0,
             update: None,
             stopped: false,
         });
@@ -122,6 +150,7 @@ mod tests {
     #[test]
     fn overwritten_inputs_are_released_and_sequences_are_checked() -> Result<(), UpdateError> {
         let (sender, receiver) = watch::channel(Mailbox {
+            sequence: 0,
             update: None,
             stopped: false,
         });
@@ -137,6 +166,7 @@ mod tests {
             assert!(weak.upgrade().is_none());
         }
         updates.0.send_modify(|mailbox| {
+            mailbox.sequence = u64::MAX;
             mailbox.update = Some(Arc::new(DesiredUpdate {
                 sequence: u64::MAX,
                 desired: Arc::new(0),
@@ -144,6 +174,10 @@ mod tests {
         });
         assert_eq!(
             updates.submit(Arc::new(1)),
+            Err(UpdateError::SequenceExhausted)
+        );
+        assert_eq!(
+            updates.invalidate_pending(),
             Err(UpdateError::SequenceExhausted)
         );
         assert_eq!(
@@ -167,6 +201,7 @@ mod concurrent_tests {
     async fn concurrent_producers_share_sequences_and_latest_value()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (sender, receiver) = watch::channel(Mailbox {
+            sequence: 0,
             update: None,
             stopped: false,
         });

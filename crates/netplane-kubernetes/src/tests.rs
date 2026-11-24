@@ -1,8 +1,12 @@
 mod hardening;
+mod integration;
 mod lifecycle;
+mod observations;
+mod publication_races;
 mod recovery;
 mod support;
 mod topology;
+mod translation;
 
 use crate::DiscoveryConfig;
 use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};

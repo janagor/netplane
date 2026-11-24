@@ -16,6 +16,17 @@ Published wrappers share an `Arc<GraphVersion>`. A rollback takes the executable
 
 Shutdown closes admission while holding the control mutex, clears history, and returns the runtime's drain future. A timeout remains retryable, but rollback history is never restored. Inspection reads active ID, graph metadata, and the matching token from the same loaded publication. Controller publication and shutdown events are emitted after releasing the control mutex so subscriber callbacks may inspect the controller.
 
+## Reconciliation invalidation
+
+The optional control driver checks its input mailbox under a read guard and passes
+that guard to `publish_if_current_guarded`. The controller drops it after the atomic
+swap and controller unlock, before tracing callbacks and displaced-version cleanup.
+Producers serialize submission, invalidation and shutdown through the mailbox write
+lock. Thus an earlier candidate cannot commit after invalidation returns; a swap
+that completed first remains active. The order is mailbox then controller, with no
+lock held across preparation awaits. Core remains independent of reconciliation
+schemas and discovery systems.
+
 ## Consequences
 
 Control callers must inspect after conflicts and decide whether their candidate still applies. A historical publication may be evicted even while request futures still use it. `version.released` describes publication wrapper ownership, not necessarily final executable graph reclamation. Persistent history, health decisions, transport administration, and graph diffing remain outside this API.

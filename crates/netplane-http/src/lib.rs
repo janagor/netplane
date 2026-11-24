@@ -243,3 +243,6 @@ fn empty(status: StatusCode) -> Response<Bytes> {
 fn body_response(response: Response<Bytes>) -> Response<Body> {
     response.map(Body::from)
 }
+
+/// Bounded outbound HTTP forwarding, independent of discovery.
+pub mod upstream;

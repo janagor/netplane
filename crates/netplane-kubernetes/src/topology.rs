@@ -109,7 +109,8 @@ pub fn build(
         })
         .collect();
     // Accumulate destinations by Service without scanning unrelated resources.
-    let mut destinations = BTreeMap::<_, BTreeMap<_, EndpointConditions>>::new();
+    let mut destinations =
+        BTreeMap::<_, BTreeMap<_, (EndpointConditions, BTreeSet<String>)>>::new();
     for ((namespace, _), slice) in &slices.committed {
         let Some(name) = slice
             .metadata
@@ -153,6 +154,10 @@ pub fn build(
             }
             for endpoint in &slice.endpoints {
                 let conditions = endpoint_conditions(endpoint);
+                let target_uid = endpoint
+                    .target_ref
+                    .as_ref()
+                    .and_then(|target| target.uid.clone());
                 for address in &endpoint.addresses {
                     let Ok(address) = address.parse::<IpAddr>() else {
                         tracing::warn!("unsupported_endpoint: invalid IP");
@@ -165,12 +170,15 @@ pub fn build(
                     let entries = destinations.entry(key.clone()).or_default();
                     entries
                         .entry((address, number, port_name.clone(), transport))
-                        .and_modify(|old| {
+                        .and_modify(|(old, uids)| {
+                            uids.extend(target_uid.clone());
                             old.ready = merge(old.ready, conditions.ready, false);
                             old.serving = merge(old.serving, conditions.serving, false);
                             old.terminating = merge(old.terminating, conditions.terminating, true);
                         })
-                        .or_insert_with(|| conditions.clone());
+                        .or_insert_with(|| {
+                            (conditions.clone(), target_uid.iter().cloned().collect())
+                        });
                 }
             }
         }
@@ -179,15 +187,7 @@ pub fn build(
         if let Some(service) = result.get_mut(&key) {
             service.endpoints = entries
                 .into_iter()
-                .map(
-                    |((address, port, port_name, protocol), conditions)| DiscoveredEndpoint {
-                        address,
-                        port,
-                        port_name,
-                        protocol,
-                        conditions,
-                    },
-                )
+                .map(|(destination, observation)| discovered_endpoint(destination, observation))
                 .collect();
         }
     }
@@ -203,4 +203,23 @@ fn endpoint_conditions(endpoint: &k8s_openapi::api::discovery::v1::Endpoint) -> 
             serving: c.serving,
             terminating: c.terminating,
         })
+}
+
+fn discovered_endpoint(
+    (address, port, port_name, protocol): (IpAddr, u16, Option<String>, TransportProtocol),
+    (mut conditions, uids): (EndpointConditions, BTreeSet<String>),
+) -> DiscoveredEndpoint {
+    if uids.len() > 1 {
+        // A destination with conflicting Pod identities is unsafe to route.
+        conditions.ready = Some(false);
+        tracing::warn!("unsupported_endpoint: conflicting target UIDs");
+    }
+    DiscoveredEndpoint {
+        target_uid: uids.into_iter().next(),
+        address,
+        port,
+        port_name,
+        protocol,
+        conditions,
+    }
 }

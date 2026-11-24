@@ -103,7 +103,7 @@ where
             revision,
             armed: true,
         };
-        let result = self.apply_candidate(desired, || true).await;
+        let result = self.apply_candidate(desired, || Some(())).await;
         guard.armed = false;
         self.observation.finish(revision, &result, false);
         if matches!(
@@ -115,10 +115,10 @@ where
         result
     }
 
-    pub(crate) async fn apply_checked(
+    pub(crate) async fn apply_checked<G>(
         &self,
         desired: D,
-        current: impl Fn() -> bool + Send,
+        current: impl Fn() -> Option<G> + Send,
     ) -> Result<ApplyOutcome, ApplyError<P::Error>> {
         let _permit = self
             .preparation
@@ -127,10 +127,10 @@ where
         self.apply_candidate(desired, current).await
     }
 
-    async fn apply_candidate(
+    async fn apply_candidate<G>(
         &self,
         desired: D,
-        current: impl Fn() -> bool + Send,
+        current: impl Fn() -> Option<G> + Send,
     ) -> Result<ApplyOutcome, ApplyError<P::Error>> {
         self.preparer
             .validate(&desired)
@@ -146,6 +146,7 @@ where
                     .as_ref()
                     .is_some_and(|active| active.id == last.published)
             {
+                let _guard = current().ok_or(ApplyError::Superseded)?;
                 return Ok(ApplyOutcome::Unchanged(last.published));
             }
         }
@@ -155,14 +156,11 @@ where
             .prepare(desired)
             .await
             .map_err(ApplyError::Preparation)?;
-        // This check and conditional publication are separate operations. Driver
-        // shutdown or a newer update can race after the check and before commit.
-        if !current() {
-            return Err(ApplyError::Superseded);
-        }
+        // The caller's guard serializes producer invalidation with the atomic swap.
+        let guard = current().ok_or(ApplyError::Superseded)?;
         let outcome = self
             .controller
-            .publish_if_current(token, candidate)
+            .publish_if_current_guarded(token, candidate, guard)
             .map_err(ApplyError::Publication)?;
         let record = Arc::new(LastApplied {
             desired: recorded,

@@ -1,6 +1,6 @@
 use crate::{
-    DiscoveryConfig, DiscoveryError, DiscoverySnapshot, DiscoveryStatus, WatchStatus,
-    state::ResourceCache, topology,
+    DiscoveryConfig, DiscoveryError, DiscoveryObservation, DiscoverySnapshot, DiscoveryStatus,
+    WatchStatus, state::ResourceCache, topology,
 };
 use futures_util::{Stream, StreamExt};
 use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
@@ -19,14 +19,27 @@ pub struct Discovery {
     config: DiscoveryConfig,
     snapshots: watch::Sender<Option<Arc<DiscoverySnapshot>>>,
     status: watch::Sender<DiscoveryStatus>,
+    observations: watch::Sender<Arc<DiscoveryObservation>>,
 }
 /// Cloneable access to latest immutable topology and watcher status.
 #[derive(Clone)]
 pub struct DiscoveryHandle {
     snapshots: watch::Receiver<Option<Arc<DiscoverySnapshot>>>,
     status: watch::Receiver<DiscoveryStatus>,
+    observations: watch::Receiver<Arc<DiscoveryObservation>>,
 }
 impl DiscoveryHandle {
+    /// Subscribe to coherent topology and health captured after each watcher event.
+    ///
+    /// Prefer this channel for reconciliation. Legacy snapshot/status subscriptions
+    /// remain independently sampled. Clone the observation and release its watch
+    /// guard before doing work; holding a guard can block discovery publication.
+    /// This is a latest-value channel, not an event log: intermediate unhealthy
+    /// observations can be overwritten by recovery without changing topology revision.
+    #[must_use]
+    pub fn subscribe_observations(&self) -> watch::Receiver<Arc<DiscoveryObservation>> {
+        self.observations.clone()
+    }
     /// Latest snapshot, or `None` before both initial listings complete.
     #[must_use]
     pub fn snapshot(&self) -> Option<Arc<DiscoverySnapshot>> {
@@ -42,7 +55,7 @@ impl DiscoveryHandle {
     }
     /// Current independent watcher states.
     /// Status and snapshots are separate observations, not an atomic pair.
-    /// Use the revision on the snapshot being processed for reconciliation.
+    /// Use `subscribe_observations` when pairing health with topology for reconciliation.
     #[must_use]
     pub fn status(&self) -> DiscoveryStatus {
         self.status.borrow().clone()
@@ -70,16 +83,22 @@ impl Discovery {
             endpoint_slices: WatchStatus::Initializing,
             latest_revision: None,
         });
+        let (observations, observation_rx) = watch::channel(Arc::new(DiscoveryObservation {
+            snapshot: None,
+            status: status.borrow().clone(),
+        }));
         Ok((
             Self {
                 client,
                 config,
                 snapshots,
                 status,
+                observations,
             },
             DiscoveryHandle {
                 snapshots: snapshot_rx,
                 status: status_rx,
+                observations: observation_rx,
             },
         ))
     }
@@ -133,23 +152,30 @@ impl Discovery {
             if changed && service_cache.synchronized() && slice_cache.synchronized() {
                 let topology = topology::build(&service_cache, &slice_cache, &self.config);
                 let previous = self.snapshots.borrow().clone();
-                if previous.as_ref().is_some_and(|p| p.services == topology) {
-                    continue;
+                if !previous.as_ref().is_some_and(|p| p.services == topology) {
+                    let revision = previous
+                        .as_ref()
+                        .map_or(Some(1), |p| p.revision.checked_add(1))
+                        .ok_or(DiscoveryError::RevisionExhausted)?;
+                    self.snapshots
+                        .send_replace(Some(Arc::new(DiscoverySnapshot {
+                            revision,
+                            services: topology,
+                        })));
+                    self.status
+                        .send_modify(|s| s.latest_revision = Some(revision));
+                    tracing::info!(revision, "snapshot_published");
                 }
-                let revision = previous
-                    .as_ref()
-                    .map_or(Some(1), |p| p.revision.checked_add(1))
-                    .ok_or(DiscoveryError::RevisionExhausted)?;
-                self.snapshots
-                    .send_replace(Some(Arc::new(DiscoverySnapshot {
-                        revision,
-                        services: topology,
-                    })));
-                self.status
-                    .send_modify(|s| s.latest_revision = Some(revision));
-                tracing::info!(revision, "snapshot_published");
             }
+            self.publish_observation();
         }
+    }
+    fn publish_observation(&self) {
+        self.observations
+            .send_replace(Arc::new(DiscoveryObservation {
+                snapshot: self.snapshots.borrow().clone(),
+                status: self.status.borrow().clone(),
+            }));
     }
     fn process<K: kube::ResourceExt + PartialEq>(
         &self,
@@ -236,6 +262,7 @@ impl Drop for Discovery {
                 s.endpoint_slices = WatchStatus::Stopped;
             }
         });
+        self.publish_observation();
         tracing::info!("discovery_stopped");
     }
 }

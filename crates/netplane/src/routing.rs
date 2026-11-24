@@ -97,9 +97,7 @@ impl WeightedRouting {
     /// Select a backend label without allocation, accepting any key bytes.
     #[must_use]
     pub fn select(&self, key: &[u8]) -> &str {
-        let hash = key.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
-        });
+        let hash = hash_key(key);
         let bucket = hash % 100;
         // Validation guarantees a final threshold of 100, greater than bucket.
         let index = self
@@ -114,5 +112,61 @@ impl WeightedRouting {
     /// aligned with this policy. Graph validation checks the referenced services.
     pub fn targets(&self) -> impl Iterator<Item = &str> {
         self.targets.iter().map(|target| target.name.as_str())
+    }
+}
+
+fn hash_key(key: &[u8]) -> u64 {
+    key.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// An equal-weight policy requires nonempty, unique target names.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum UniformRoutingError {
+    /// At least one target is required.
+    #[error("uniform routing requires at least one target")]
+    EmptyTargets,
+    /// A target name is empty or repeated.
+    #[error("uniform routing requires nonempty unique target names")]
+    InvalidTarget,
+}
+
+/// Equal-weight deterministic selection using FNV-1a modulo the target count.
+///
+/// Target order is significant. Normalize it before construction for stable
+/// topology equality. This shares the weighted policy's key hash, supports any
+/// positive number of targets, and performs no I/O, retries or health checks.
+/// It is not consistent hashing: changes can reassign keys to other targets.
+#[derive(Clone, Debug)]
+pub struct UniformRouting {
+    targets: Box<[String]>,
+}
+impl UniformRouting {
+    /// Validate target labels before constructing any graph workers.
+    ///
+    /// # Errors
+    /// Returns an error for an empty set, empty label or duplicate label.
+    pub fn try_new(targets: impl IntoIterator<Item = String>) -> Result<Self, UniformRoutingError> {
+        let targets: Box<[_]> = targets.into_iter().collect();
+        if targets.is_empty() {
+            return Err(UniformRoutingError::EmptyTargets);
+        }
+        let mut seen = HashSet::new();
+        if targets
+            .iter()
+            .any(|name| name.is_empty() || !seen.insert(name))
+        {
+            return Err(UniformRoutingError::InvalidTarget);
+        }
+        Ok(Self { targets })
+    }
+
+    /// Select one immutable target using caller-supplied stable key bytes.
+    #[must_use]
+    pub fn select(&self, key: &[u8]) -> &str {
+        // The remainder is below the usize target count, including on 32-bit hosts.
+        let index = usize::try_from(hash_key(key) % self.targets.len() as u64).unwrap_or(0);
+        &self.targets[index]
     }
 }

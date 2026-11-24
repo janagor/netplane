@@ -23,7 +23,7 @@ the single-flight permit; a busy call does not replace the desired revision.
 An unpolled call is not yet accepted. Revision exhaustion rejects new work.
 Moving a previously used reconciler into a driver preserves revision numbering.
 
-`desired_revision` identifies the latest accepted submission, even during
+`desired_revision` identifies the latest accepted submission or invalidation, even during
 coalescing or another candidate's preparation. `applied_revision` identifies the
 last successful publication or equivalent-state deduplication. Coalesced or
 superseded updates do not acquire fabricated applied records.
@@ -50,12 +50,18 @@ and executable graph. Failure categories contain no application error strings.
 The existing `ApplyError` and `DriverStatus` retain typed errors for applications.
 
 A new submission during preparation immediately becomes the desired revision.
-The older completion cannot change that revision or make it idle. Publication can
-race after the driver's existing final freshness check: a successful older commit
-is recorded as applied while the newest desired revision remains pending.
+The older completion cannot change that revision or make it idle. Freshness checking
+and publication retain the same mailbox read guard through the atomic swap. A newer
+submission or invalidation can arrive after that swap and before its success event;
+that successful older commit is recorded without marking newer work idle.
+
+Invalidation advances the desired revision, enters `Blocked` with failure
+`Invalidated`, and preserves the applied revision and active publication. Driver
+status becomes `Invalidated(sequence)` after the prior attempt finishes. Recovery
+requires a new submission. After invalidation or shutdown returns, no earlier
+candidate can commit; a swap that completed first remains active.
 Shutdown closes update admission immediately; `Stopped` means worker cleanup has
-completed. Await the worker to rule out further publication, including a commit
-that already passed its freshness check. Dropping an unused driver or aborting
+completed. Await the worker to confirm cleanup. Dropping an unused driver or aborting
 and joining its run task also reports `Stopped`. Dropping an explicit application
 future during preparation records `Blocked` with `Cancelled` and releases its
 permit; subsequent explicit application can recover.
@@ -73,6 +79,7 @@ Tracing target `netplane_control` emits these typed transitions:
 | Event | Level |
 | --- | --- |
 | `reconcile.desired_updated` | INFO |
+| `reconcile.invalidated` | WARN |
 | `reconcile.started` | DEBUG |
 | `reconcile.applied` | INFO |
 | `reconcile.unchanged` | DEBUG |

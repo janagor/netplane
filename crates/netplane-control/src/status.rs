@@ -1,6 +1,6 @@
 use netplane::VersionId;
 
-/// Local accepted-update sequence, independent of publication generations.
+/// Local update/invalidation sequence, independent of publication generations.
 pub type Revision = u64;
 
 /// Current reconciliation activity.
@@ -23,6 +23,8 @@ pub enum ReconciliationPhase {
 /// Bounded failure category; never contains application error text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReconciliationFailure {
+    /// A producer withdrew pending work until a new valid submission arrives.
+    Invalidated,
     /// Application policy rejected the configuration.
     Validation,
     /// Candidate construction failed.
@@ -42,7 +44,7 @@ pub enum ReconciliationFailure {
 /// Internally consistent observation of one reconciler, separate from runtime metrics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReconciliationStatus {
-    /// Latest locally accepted update, including semantically equal resubmissions.
+    /// Latest accepted update or invalidation, including equal resubmissions.
     pub desired_revision: Option<Revision>,
     /// Last update successfully published or deduplicated.
     pub applied_revision: Option<Revision>,

@@ -8,6 +8,7 @@ static NEXT_RECONCILER: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy)]
 pub enum Kind {
     DesiredUpdated,
+    Invalidated,
     Started,
     Applied,
     Unchanged,
@@ -34,6 +35,7 @@ impl Event {
         let s = self.status;
         let event = match self.kind {
             Kind::DesiredUpdated => "reconcile.desired_updated",
+            Kind::Invalidated => "reconcile.invalidated",
             Kind::Started => "reconcile.started",
             Kind::Applied => "reconcile.applied",
             Kind::Unchanged => "reconcile.unchanged",
@@ -54,7 +56,7 @@ impl Event {
         }
         match self.kind {
             Kind::DesiredUpdated | Kind::Applied | Kind::Stopped => record!(info),
-            Kind::RetryScheduled | Kind::Failed => record!(warn),
+            Kind::RetryScheduled | Kind::Failed | Kind::Invalidated => record!(warn),
             Kind::Started | Kind::Unchanged | Kind::Superseded => record!(debug),
         }
     }
@@ -116,6 +118,14 @@ impl Observation {
             s.phase = Phase::Pending;
             s.retry_attempt = 0;
             s.last_failure = None;
+        })
+    }
+    pub(super) fn invalidated(&self, revision: u64) -> Event {
+        self.change(Kind::Invalidated, Some(revision), |s| {
+            s.desired_revision = Some(revision);
+            s.phase = Phase::Blocked;
+            s.retry_attempt = 0;
+            s.last_failure = Some(ReconciliationFailure::Invalidated);
         })
     }
     pub(super) fn started(&self, revision: u64) {

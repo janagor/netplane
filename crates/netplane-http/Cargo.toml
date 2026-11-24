@@ -23,6 +23,9 @@ test = true
 workspace = true
 
 [dependencies]
+reqwest.workspace = true
+url.workspace = true
+thiserror.workspace = true
 netplane = { version = "0.0.0", path = "../netplane" }
 axum.workspace = true
 http.workspace = true
@@ -33,9 +36,6 @@ tracing.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
-reqwest.workspace = true
-url.workspace = true
-thiserror.workspace = true
 futures-util.workspace = true
 httparse.workspace = true
 serde.workspace = true
