@@ -184,3 +184,11 @@ cancelling the bridge closes shared control update admission. Await the driver t
 confirm its last preparation/publication has finished; independently spawned tasks
 remain application-owned. The example closes runtime admission, drains accepted
 requests, stops the listener and joins runners, with a bounded forced-cleanup path.
+
+## Real cluster validation
+
+See [local Kubernetes integration tests](../../docs/kubernetes-integration-testing.md)
+for the pinned Kind environment, fixture controls, namespace-scoped permissions,
+API fault injection and diagnostic artifacts. Watch errors trigger a complete
+relist before reporting recovery, including collections with no intervening updates.
+The last published topology remains available throughout recovery.

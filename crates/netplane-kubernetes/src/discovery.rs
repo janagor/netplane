@@ -103,6 +103,8 @@ impl Discovery {
         ))
     }
     /// Poll two kube-rs watchers with backoff until cancellation.
+    /// Watch failures force a complete relist so quiet collections recover health
+    /// without waiting for another object update. List retries use kube-rs backoff.
     /// Watch failures retain snapshots and expose `Recovering` while retrying.
     /// Cancellation drops both streams, including outstanding backoff timers.
     /// After initialization, updates may publish from committed caches while
@@ -113,16 +115,13 @@ impl Discovery {
     /// # Errors
     /// Returns a typed error on unexpected stream termination or revision exhaustion.
     pub async fn run(self, cancellation: CancellationToken) -> Result<(), DiscoveryError> {
-        let services = watcher(
-            Api::<Service>::namespaced(self.client.clone(), &self.config.namespace),
-            watcher::Config::default(),
-        )
-        .default_backoff();
-        let slices = watcher(
-            Api::<EndpointSlice>::namespaced(self.client.clone(), &self.config.namespace),
-            watcher::Config::default(),
-        )
-        .default_backoff();
+        let services = Api::<Service>::namespaced(self.client.clone(), &self.config.namespace);
+        let slices = Api::<EndpointSlice>::namespaced(self.client.clone(), &self.config.namespace);
+        let services =
+            relisting_watch(move || watcher(services.clone(), watcher::Config::default()))
+                .default_backoff();
+        let slices = relisting_watch(move || watcher(slices.clone(), watcher::Config::default()))
+            .default_backoff();
         self.run_streams(services, slices, cancellation).await
     }
     pub(crate) async fn run_streams<S, E>(
@@ -140,13 +139,15 @@ impl Discovery {
         let mut slice_cache = ResourceCache::default();
         tracing::info!("discovery_started");
         loop {
-            let changed = tokio::select! {
+            let (changed, processed) = tokio::select! {
                 () = cancellation.cancelled() => { return Ok(()); }
                 event = services.next() => {
-                    self.process(event, &mut service_cache, true)?
+                    let marker = processed_resource(event.as_ref(), "services");
+                    (self.process(event, &mut service_cache, true)?, marker)
                 }
                 event = slices.next() => {
-                    self.process(event, &mut slice_cache, false)?
+                    let marker = processed_resource(event.as_ref(), "endpoint_slices");
+                    (self.process(event, &mut slice_cache, false)?, marker)
                 }
             };
             if changed && service_cache.synchronized() && slice_cache.synchronized() {
@@ -168,6 +169,10 @@ impl Discovery {
                 }
             }
             self.publish_observation();
+            if let Some((collection, resource_name, resource_version)) = processed {
+                tracing::debug!(target: "netplane", event = "discovery.resource_processed",
+                    collection, resource_name, resource_version);
+            }
         }
     }
     fn publish_observation(&self) {
@@ -294,3 +299,45 @@ fn error_kind(error: &watcher::Error) -> &'static str {
         _ => "watch_protocol",
     }
 }
+
+// kube-rs can resume a watch without emitting any event on a quiet collection.
+// Relisting after watch errors provides an explicit InitDone health boundary.
+fn relisting_watch<T, S, F>(factory: F) -> impl Stream<Item = Result<T, watcher::Error>>
+where
+    S: Stream<Item = Result<T, watcher::Error>>,
+    F: Fn() -> S,
+{
+    futures_util::stream::unfold((factory, None), |(factory, stream)| async move {
+        let mut stream = stream.unwrap_or_else(|| Box::pin(factory()));
+        let event = stream.next().await?;
+        // Leave initial-list retries to kube-rs. All replacement streams share
+        // the same surrounding default backoff.
+        let restart =
+            matches!(&event, Err(error) if !matches!(error, watcher::Error::InitialListFailed(_)));
+        Some((event, (factory, (!restart).then_some(stream))))
+    })
+}
+
+// Emitted only after the cache, topology and coherent observation have been updated.
+fn processed_resource<K: kube::ResourceExt>(
+    event: Option<&Result<watcher::Event<K>, watcher::Error>>,
+    collection: &'static str,
+) -> Option<(&'static str, String, String)> {
+    // Both watcher paths skip identity allocation when DEBUG is disabled.
+    if !tracing::enabled!(target: "netplane", tracing::Level::DEBUG) {
+        return None;
+    }
+    match event?.as_ref().ok()? {
+        watcher::Event::Apply(resource)
+        | watcher::Event::InitApply(resource)
+        | watcher::Event::Delete(resource) => Some((
+            collection,
+            resource.name_any(),
+            resource.resource_version()?,
+        )),
+        watcher::Event::Init | watcher::Event::InitDone => None,
+    }
+}
+
+#[cfg(test)]
+mod retry_tests;

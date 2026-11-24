@@ -1,0 +1,33 @@
+[package]
+name = "netplane-kubernetes-e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+netplane = { version = "0.0.0", path = "../../crates/netplane" }
+netplane-control = { version = "0.0.0", path = "../../crates/netplane-control" }
+netplane-kubernetes = { version = "0.0.0", path = "../../crates/netplane-kubernetes" }
+axum.workspace = true
+bytes.workspace = true
+http.workspace = true
+futures-util.workspace = true
+kube.workspace = true
+k8s-openapi.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal", "io-util"] }
+tokio-util.workspace = true
+tower.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
+
+# cargo-machete does not follow the gateway's #[path] diagnostic modules.
+# Both crates are used by src/observations.rs.
+[package.metadata.cargo-machete]
+ignored = ["tracing", "tracing-subscriber"]

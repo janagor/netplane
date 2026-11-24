@@ -112,3 +112,7 @@ monitoring/prometheus-data/
 
 # commandcode
 .commandcode/
+
+# Reproducible cluster fixture application dependency graph.
+!tests/kubernetes/Cargo.lock
+/artifacts/
