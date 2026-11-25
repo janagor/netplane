@@ -74,6 +74,9 @@ fn failure_payloads_are_independent_and_reentrant_delivery_can_reverse_sequences
     observation.failed(2, &ApplyError::<()>::Busy, false);
     assert_eq!(observation.status().phase, Phase::Stopped);
     assert_eq!(observation.status().last_failure, Some(Failure::Validation));
+    // Other unit tests can register this callsite while the global subscriber
+    // is installed. Refresh its interest before checking recursive delivery.
+    tracing::callsite::rebuild_interest_cache();
     reentrant.desired(1).emit();
     let events = events
         .lock()

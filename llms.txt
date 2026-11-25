@@ -31,6 +31,7 @@
 - [crates/netplane-control](crates/netplane-control/): Optional typed reconciliation; depends on the core runtime.
 - [crates/netplane-kubernetes](crates/netplane-kubernetes/): Optional topology discovery; independent of runtime and control.
 - [docs/control-plane.md](docs/control-plane.md): Desired-state reconciliation contract.
+- [docs/progressive-rollouts.md](docs/progressive-rollouts.md): Guarded stages, evidence and lifecycle guarantees.
 - [docs/control-plane-observability.md](docs/control-plane-observability.md): Reconciliation snapshots and audit events.
 - [crates/xtask](crates/xtask/): Development tooling; never a runtime dependency.
 - [README.md](README.md): Project overview and local commands.

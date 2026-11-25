@@ -63,8 +63,13 @@ impl Event {
 }
 
 pub struct Observation {
-    runtime_id: u64,
-    reconciler_id: u64,
+    pub(crate) accept_publication:
+        Option<Box<dyn Fn(VersionId, &mut dyn FnMut()) -> bool + Send + Sync>>,
+    pub(crate) next_rollout: AtomicU64,
+    pub(crate) inspect_publication: Option<Box<dyn Fn() -> Option<VersionId> + Send + Sync>>,
+    pub(crate) rollout: std::sync::Arc<tokio::sync::Semaphore>,
+    pub(crate) runtime_id: u64,
+    pub(crate) reconciler_id: u64,
     status: watch::Sender<ReconciliationStatus>,
 }
 impl Observation {
@@ -79,6 +84,10 @@ impl Observation {
             event_sequence: 0,
         });
         Self {
+            accept_publication: None,
+            next_rollout: AtomicU64::new(1),
+            inspect_publication: None,
+            rollout: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
             runtime_id,
             reconciler_id: NEXT_RECONCILER.fetch_add(1, Ordering::Relaxed),
             status,
@@ -146,7 +155,13 @@ impl Observation {
             ApplyError::Publication(netplane::ControllerError::Stale { .. }) => Failure::Conflict,
             ApplyError::Publication(_) => Failure::Publication,
             ApplyError::Superseded => {
-                self.change(Kind::Superseded, Some(revision), |_| {}).emit();
+                self.change(Kind::Superseded, Some(revision), |s| {
+                    if s.desired_revision == Some(revision) && s.phase != Phase::Stopped {
+                        s.phase = Phase::Blocked;
+                        s.last_failure = Some(Failure::Conflict);
+                    }
+                })
+                .emit();
                 return;
             }
         };

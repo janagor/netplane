@@ -34,10 +34,25 @@ where
     #[must_use]
     pub fn new(controller: Arc<ReconfigurationController<Request, Response>>, preparer: P) -> Self {
         let snapshot = controller.inspect();
-        let observation = Arc::new(crate::events::Observation::new(
+        let mut observation = crate::events::Observation::new(
             controller.runtime_id(),
             snapshot.active.map(|active| active.id),
-        ));
+        );
+        let inspector = Arc::downgrade(&controller);
+        observation.inspect_publication = Some(Box::new(move || {
+            inspector
+                .upgrade()
+                .and_then(|controller| controller.inspect().active.map(|active| active.id))
+        }));
+        let controller_guard = Arc::downgrade(&controller);
+        observation.accept_publication = Some(Box::new(move |publication, accept| {
+            controller_guard.upgrade().is_some_and(|controller| {
+                controller
+                    .with_current_publication(publication, accept)
+                    .is_ok()
+            })
+        }));
+        let observation = Arc::new(observation);
         Self {
             observation,
             controller,
@@ -103,7 +118,7 @@ where
             revision,
             armed: true,
         };
-        let result = self.apply_candidate(desired, || Some(())).await;
+        let result = self.apply_candidate(desired, || Some(()), |_| {}).await;
         guard.armed = false;
         self.observation.finish(revision, &result, false);
         if matches!(
@@ -115,22 +130,28 @@ where
         result
     }
 
+    pub(crate) fn active_publication(&self) -> Option<netplane::VersionId> {
+        self.controller.inspect().active.map(|active| active.id)
+    }
+
     pub(crate) async fn apply_checked<G>(
         &self,
         desired: D,
         current: impl Fn() -> Option<G> + Send,
+        committed: impl Fn(netplane::VersionId) + Send,
     ) -> Result<ApplyOutcome, ApplyError<P::Error>> {
         let _permit = self
             .preparation
             .try_acquire()
             .map_err(|_| ApplyError::Busy)?;
-        self.apply_candidate(desired, current).await
+        self.apply_candidate(desired, current, committed).await
     }
 
     async fn apply_candidate<G>(
         &self,
         desired: D,
         current: impl Fn() -> Option<G> + Send,
+        committed: impl Fn(netplane::VersionId) + Send,
     ) -> Result<ApplyOutcome, ApplyError<P::Error>> {
         self.preparer
             .validate(&desired)
@@ -147,6 +168,9 @@ where
                     .is_some_and(|active| active.id == last.published)
             {
                 let _guard = current().ok_or(ApplyError::Superseded)?;
+                self.controller
+                    .with_current_publication(last.published, || committed(last.published))
+                    .map_err(ApplyError::Publication)?;
                 return Ok(ApplyOutcome::Unchanged(last.published));
             }
         }
@@ -160,7 +184,9 @@ where
         let guard = current().ok_or(ApplyError::Superseded)?;
         let outcome = self
             .controller
-            .publish_if_current_guarded(token, candidate, guard)
+            .publish_if_current_guarded_with(token, candidate, guard, |outcome| {
+                committed(outcome.published);
+            })
             .map_err(ApplyError::Publication)?;
         let record = Arc::new(LastApplied {
             desired: recorded,

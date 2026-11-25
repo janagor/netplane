@@ -15,6 +15,7 @@ SOURCES=(
     docs/architecture/execution-semantics.md
     docs/architecture/health.md
     docs/control-plane.md
+    docs/progressive-rollouts.md
     docs/control-plane-observability.md
     docs/http-boundaries.md
     docs/adr/0001-tower-service-model.md
@@ -23,6 +24,7 @@ SOURCES=(
     docs/adr/0004-graph-composition.md
     docs/adr/0005-reconfiguration-control.md
     docs/adr/0006-backend-health.md
+    docs/adr/0007-progressive-rollouts.md
     QUICKSTART.md
     SECURITY.md
 )
@@ -68,6 +70,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - [crates/netplane-control](crates/netplane-control/): Optional typed reconciliation; depends on the core runtime.
 - [crates/netplane-kubernetes](crates/netplane-kubernetes/): Optional topology discovery; independent of runtime and control.
 - [docs/control-plane.md](docs/control-plane.md): Desired-state reconciliation contract.
+- [docs/progressive-rollouts.md](docs/progressive-rollouts.md): Guarded stages, evidence and lifecycle guarantees.
 - [docs/control-plane-observability.md](docs/control-plane-observability.md): Reconciliation snapshots and audit events.
 - [crates/xtask](crates/xtask/): Development tooling; never a runtime dependency.
 - [README.md](README.md): Project overview and local commands.

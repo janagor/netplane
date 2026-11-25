@@ -24,6 +24,11 @@ name = "health_aware_gateway"
 path = "examples/health_aware_gateway/main.rs"
 test = true
 
+[[example]]
+name = "progressive_rollout"
+path = "examples/progressive_rollout/main.rs"
+test = true
+
 [lints]
 workspace = true
 
@@ -41,6 +46,7 @@ tracing.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
+netplane-control = { version = "0.0.0", path = "../netplane-control" }
 futures-util.workspace = true
 httparse.workspace = true
 serde.workspace = true

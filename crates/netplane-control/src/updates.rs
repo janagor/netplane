@@ -12,8 +12,15 @@ pub struct DesiredUpdate<D> {
 
 pub struct Mailbox<D> {
     pub sequence: u64,
+    pub guarded_publication: Option<netplane::VersionId>,
+    pub intent: Option<Arc<OwnedIntent>>,
     pub update: Option<Arc<DesiredUpdate<D>>>,
     pub stopped: bool,
+}
+
+#[derive(Default)]
+pub struct OwnedIntent {
+    pub committed: std::sync::OnceLock<netplane::VersionId>,
 }
 
 /// A bounded latest-value producer. Clones share sequencing and one pending slot.
@@ -32,6 +39,9 @@ pub enum UpdateError {
     /// No further local sequence numbers are available.
     #[error("update sequence exhausted")]
     SequenceExhausted,
+    /// Another producer superseded the expected desired revision.
+    #[error("desired revision changed")]
+    Conflict,
 }
 
 impl<D> UpdateSender<D> {
@@ -42,7 +52,7 @@ impl<D> UpdateSender<D> {
     /// Returns an error after shutdown, worker drop, or sequence exhaustion.
     /// A previously stopped reconciler cannot accept updates through a new driver.
     pub fn submit(&self, desired: D) -> Result<u64, UpdateError> {
-        self.replace(Some(desired))
+        self.replace(Some(desired), None, None).map(Receipt::emit)
     }
 
     /// Supersede all pending/preparing candidates without stopping the driver.
@@ -57,10 +67,28 @@ impl<D> UpdateSender<D> {
     /// # Errors
     /// Returns an error after shutdown/driver drop or on sequence exhaustion.
     pub fn invalidate_pending(&self) -> Result<u64, UpdateError> {
-        self.replace(None)
+        self.replace(None, None, None).map(Receipt::emit)
     }
 
-    fn replace(&self, desired: Option<D>) -> Result<u64, UpdateError> {
+    pub(crate) fn submit_guarded(
+        &self,
+        desired: D,
+        expected: u64,
+        publication: netplane::VersionId,
+    ) -> Result<Receipt<D>, UpdateError> {
+        self.replace(Some(desired), Some(expected), Some(publication))
+    }
+
+    pub(crate) fn withdraw(&self, expected: u64) -> Option<Receipt<D>> {
+        self.replace(None, Some(expected), None).ok()
+    }
+
+    fn replace(
+        &self,
+        mut desired: Option<D>,
+        expected: Option<u64>,
+        publication: Option<netplane::VersionId>,
+    ) -> Result<Receipt<D>, UpdateError> {
         if self.0.is_closed() {
             return Err(UpdateError::Stopped);
         }
@@ -72,30 +100,61 @@ impl<D> UpdateSender<D> {
             if mailbox.stopped || status.phase == crate::ReconciliationPhase::Stopped {
                 return false;
             }
+            if expected.is_some_and(|expected| expected != mailbox.sequence)
+                || (expected.is_some()
+                    && desired.is_none()
+                    && mailbox
+                        .intent
+                        .as_ref()
+                        .is_none_or(|intent| intent.committed.get().is_some()))
+            {
+                result = Err(UpdateError::Conflict);
+                return false;
+            }
             let previous = mailbox.sequence.max(status.desired_revision.unwrap_or(0));
             let Some(sequence) = previous.checked_add(1) else {
                 result = Err(UpdateError::SequenceExhausted);
                 return false;
             };
-            mailbox.sequence = sequence;
-            let invalidated = desired.is_none();
-            retired = std::mem::replace(
-                &mut mailbox.update,
-                desired.map(|desired| Arc::new(DesiredUpdate { sequence, desired })),
-            );
-            event = Some(if invalidated {
-                self.1.invalidated(sequence)
-            } else {
-                self.1.desired(sequence)
-            });
-            result = Ok(sequence);
-            true
+            let replaced = {
+                let mut replace = || {
+                    mailbox.sequence = sequence;
+                    mailbox.guarded_publication = publication;
+                    mailbox.intent = publication.map(|_| Arc::new(OwnedIntent::default()));
+                    let invalidated = desired.is_none();
+                    retired = std::mem::replace(
+                        &mut mailbox.update,
+                        desired
+                            .take()
+                            .map(|desired| Arc::new(DesiredUpdate { sequence, desired })),
+                    );
+                    event = Some(if invalidated {
+                        self.1.invalidated(sequence)
+                    } else {
+                        self.1.desired(sequence)
+                    });
+                    result = Ok(sequence);
+                };
+                if let Some(publication) = publication {
+                    self.1
+                        .accept_publication
+                        .as_ref()
+                        .is_some_and(|guard| guard(publication, &mut replace))
+                } else {
+                    replace();
+                    true
+                }
+            };
+            if !replaced {
+                result = Err(UpdateError::Conflict);
+            }
+            replaced
         });
-        if let Some(event) = event {
-            event.emit();
-        }
-        drop(retired); // Application-owned configuration cleanup runs outside the mailbox lock.
-        result
+        result.map(|sequence| Receipt {
+            sequence,
+            event,
+            retired,
+        })
     }
 
     /// Read a consistent snapshot, including the latest accepted desired revision.
@@ -125,6 +184,23 @@ impl<D> UpdateSender<D> {
     }
 }
 
+// Defer tracing callbacks and application-owned destructors until every producer
+// control lock has been released, not just the mailbox lock.
+pub struct Receipt<D> {
+    pub sequence: u64,
+    event: Option<crate::events::Event>,
+    retired: Option<Arc<DesiredUpdate<D>>>,
+}
+impl<D> Receipt<D> {
+    pub fn emit(self) -> u64 {
+        if let Some(event) = self.event {
+            event.emit();
+        }
+        drop(self.retired);
+        self.sequence
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DesiredUpdate, Mailbox, UpdateError, UpdateSender};
@@ -135,6 +211,8 @@ mod tests {
     fn stopped_observation_rejects_submission_even_if_mailbox_is_open() {
         let (sender, receiver) = watch::channel(Mailbox {
             sequence: 0,
+            guarded_publication: None,
+            intent: None,
             update: None,
             stopped: false,
         });
@@ -151,6 +229,8 @@ mod tests {
     fn overwritten_inputs_are_released_and_sequences_are_checked() -> Result<(), UpdateError> {
         let (sender, receiver) = watch::channel(Mailbox {
             sequence: 0,
+            guarded_publication: None,
+            intent: None,
             update: None,
             stopped: false,
         });
@@ -202,6 +282,8 @@ mod concurrent_tests {
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (sender, receiver) = watch::channel(Mailbox {
             sequence: 0,
+            guarded_publication: None,
+            intent: None,
             update: None,
             stopped: false,
         });

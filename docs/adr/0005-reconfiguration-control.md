@@ -27,6 +27,13 @@ that completed first remains active. The order is mailbox then controller, with 
 lock held across preparation awaits. Core remains independent of reconciliation
 schemas and discovery systems.
 
+`with_current_publication` accepts bounded control-plane decisions under the
+existing controller lock without publishing. `publish_if_current_guarded_with`
+acknowledges successful swaps under that lock and before releasing the external
+freshness guard. These callbacks must only update internal synchronization state:
+no blocking, reentry, tracing or application callbacks. Both operations preserve
+the existing mailbox-before-controller lock order and add no request-path lock.
+
 ## Consequences
 
 Control callers must inspect after conflicts and decide whether their candidate still applies. A historical publication may be evicted even while request futures still use it. `version.released` describes publication wrapper ownership, not necessarily final executable graph reclamation. Persistent history, health decisions, transport administration, and graph diffing remain outside this API.

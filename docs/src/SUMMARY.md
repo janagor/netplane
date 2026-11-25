@@ -6,6 +6,7 @@
 - [Execution semantics](./execution-semantics.md)
 - [Backend health](./health.md)
 - [Control plane](./control-plane.md)
+- [Progressive rollouts](./progressive-rollouts.md)
 - [Reconciliation observability](./control-plane-observability.md)
 - [CI/CD](./ci.md)
 - [Faster Builds](./faster-builds.md)

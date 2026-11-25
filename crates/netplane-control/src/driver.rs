@@ -81,6 +81,8 @@ where
         let stopped = reconciler.status().phase == crate::ReconciliationPhase::Stopped;
         let (sender, updates) = watch::channel(Mailbox {
             sequence: 0,
+            guarded_publication: None,
+            intent: None,
             update: None,
             stopped,
         });
@@ -132,8 +134,13 @@ where
 
     fn current_guard(&self, sequence: u64) -> Option<watch::Ref<'_, Mailbox<D>>> {
         let mailbox = self.updates.borrow();
-        (!mailbox.stopped && mailbox.sequence == sequence && mailbox.update.is_some())
-            .then_some(mailbox)
+        (!mailbox.stopped
+            && mailbox.sequence == sequence
+            && mailbox.update.is_some()
+            && mailbox
+                .guarded_publication
+                .is_none_or(|expected| self.reconciler.active_publication() == Some(expected)))
+        .then_some(mailbox)
     }
 
     fn latest(&mut self, completed: &mut u64) -> Option<Arc<crate::DesiredUpdate<D>>> {
@@ -147,6 +154,24 @@ where
             *completed = sequence;
         }
         update
+    }
+
+    async fn apply_update(
+        &self,
+        update: &crate::DesiredUpdate<D>,
+    ) -> Result<ApplyOutcome, ApplyError<P::Error>> {
+        let intent = self.updates.borrow().intent.clone();
+        self.reconciler
+            .apply_checked(
+                update.desired.clone(),
+                || self.current_guard(update.sequence),
+                |publication| {
+                    if let Some(intent) = &intent {
+                        let _ = intent.committed.set(publication);
+                    }
+                },
+            )
+            .await
     }
 
     async fn coalesce(&mut self) -> bool {
@@ -205,10 +230,7 @@ where
                 observation.started(sequence);
                 self.status
                     .send_replace(Arc::new(DriverStatus::Preparing(sequence)));
-                let result = self
-                    .reconciler
-                    .apply_checked(update.desired.clone(), || self.current_guard(sequence))
-                    .await;
+                let result = self.apply_update(&update).await;
                 // A producer can update after the atomic swap but before event delivery.
                 // Record that commit without making the newer desired revision idle.
                 if result.is_ok() {

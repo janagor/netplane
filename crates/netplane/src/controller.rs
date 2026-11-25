@@ -10,6 +10,7 @@ use std::{
 use thiserror::Error;
 
 mod events;
+mod operations;
 use crate::{
     DrainError, GraphMetadata, GraphVersion, Handle, Netplane, PublishError, PublishedVersion,
     VersionId,
@@ -254,7 +255,13 @@ where
         guard: G,
     ) -> Result<ReconfigurationOutcome, ControllerError> {
         let graph = Arc::new(candidate);
-        self.publish_graph(expected, &graph, PublicationKind::Replacement, guard)
+        self.publish_graph(
+            expected,
+            &graph,
+            PublicationKind::Replacement,
+            guard,
+            |_| {},
+        )
     }
 
     /// Republish a retained executable graph under a fresh generation.
@@ -301,6 +308,7 @@ where
         graph: &Arc<GraphVersion<Request, Response>>,
         kind: PublicationKind,
         guard: impl Sized,
+        committed: impl FnOnce(ReconfigurationOutcome),
     ) -> Result<ReconfigurationOutcome, ControllerError> {
         let mut state = self
             .state
@@ -309,6 +317,9 @@ where
         let result = check(&state, expected).and_then(|()| publish_locked(&mut state, graph, kind));
         if result.is_err() {
             state.counters.rejected_total = state.counters.rejected_total.saturating_add(1);
+        }
+        if let Ok((events, _)) = &result {
+            committed(events.outcome);
         }
         let runtime_id = state.runtime.runtime_id;
         let actual = state.runtime.active_version_id();

@@ -305,6 +305,7 @@ async fn dropping_scheduler_future_aborts_checks_and_closes_registration() -> Te
 
 #[derive(Clone)]
 struct CountedProbe {
+    started: Arc<tokio::sync::Semaphore>,
     current: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
 }
@@ -324,6 +325,7 @@ impl HealthProbe for CountedProbe {
     fn check(&self) -> Self::Future {
         let active = self.current.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(active, Ordering::SeqCst);
+        self.started.add_permits(1);
         let guard = ActiveCheck(Arc::clone(&self.current));
         Box::pin(async move {
             let _guard = guard;
@@ -342,11 +344,18 @@ async fn immediate_reregistration_never_overlaps_cancelled_probe() -> TestResult
     let control = scheduler.handle();
     let current = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
+    let started = Arc::new(tokio::sync::Semaphore::new(0));
     let probe = CountedProbe {
+        started: Arc::clone(&started),
         current: Arc::clone(&current),
         peak: Arc::clone(&peak),
     };
     let task = tokio::spawn(scheduler.run());
+    // Ensure the probe actually ran before exercising rapid registration churn.
+    // Yielding alone can let every registration disappear before the worker runs.
+    let initial = control.register(health.clone(), probe.clone())?;
+    started.acquire().await?.forget();
+    drop(initial);
     for _ in 0..1000 {
         let registration = control.register(health.clone(), probe.clone())?;
         settle().await;

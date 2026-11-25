@@ -15,6 +15,7 @@ mod events_tests;
 mod policy;
 mod prepare;
 mod reconciler;
+pub mod rollout;
 mod status;
 mod updates;
 

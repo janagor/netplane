@@ -14,6 +14,7 @@ SOURCES=(
     docs/architecture/execution-semantics.md
     docs/architecture/health.md
     docs/control-plane.md
+    docs/progressive-rollouts.md
     docs/control-plane-observability.md
     docs/http-boundaries.md
     docs/adr/0001-tower-service-model.md
@@ -22,6 +23,7 @@ SOURCES=(
     docs/adr/0004-graph-composition.md
     docs/adr/0005-reconfiguration-control.md
     docs/adr/0006-backend-health.md
+    docs/adr/0007-progressive-rollouts.md
     QUICKSTART.md
     SECURITY.md
 )

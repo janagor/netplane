@@ -136,3 +136,6 @@ Read [reconciliation observability](control-plane-observability.md) for consiste
 desired/applied revision snapshots, bounded status subscriptions, and structured
 audit events. The Kubernetes adapter uses coherent discovery observations and
 invalidation to hold the active graph while discovery is unhealthy or invalid.
+
+Progressive traffic policies use the [rollout contract](progressive-rollouts.md)
+and reuse the same worker rather than publishing graphs independently.

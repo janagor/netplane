@@ -38,7 +38,9 @@ The optional `netplane-control` crate adds [typed desired-state reconciliation](
 retries classified failures with capped backoff, and discards superseded candidates.
 [Reconciliation status and audit events](control-plane-observability.md) expose
 desired and applied revisions independently of runtime publication generations.
-Execution remains unchanged.
+Execution remains unchanged. [Progressive rollouts](progressive-rollouts.md)
+submit guarded desired weight updates through that same worker, requiring complete
+publication-attributed evidence before each advance. They add no request-path work.
 
 The optional [`netplane-kubernetes`](../crates/netplane-kubernetes/README.md) crate observes Services and EndpointSlices through caller-owned watchers. It publishes immutable, normalized topology snapshots after complete per-collection initialization and relisting. Discovery is eventually consistent across resource collections. An explicit `ServiceBinding`
 opts one Service into translation. `translate` resolves a Service port to normalized
@@ -96,3 +98,5 @@ A positive runtime admission limit bounds accepted, unfinished requests across a
 Inherited tooling ADRs in `docs/adr/tooling/` are not Netplane runtime design decisions.
 
 - [ADR 0006: Backend health](adr/0006-backend-health.md)
+
+- [ADR 0007: Progressive rollouts](adr/0007-progressive-rollouts.md)

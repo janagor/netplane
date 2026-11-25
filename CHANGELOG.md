@@ -6,6 +6,8 @@ Netplane has not been released. Version and workspace manifests remain at `0.0.0
 
 ### Added
 
+- Guarded progressive traffic rollouts in `netplane-control`, with validated stages, attributed observations, lifecycle control, bounded execution and real HTTP scenarios.
+
 - Optional per-instance health registry, generation-safe observations, passive Tower middleware, and bounded active probes.
 - Health-aware weighted and discovered-endpoint routing with typed unavailability, HTTP classification, a gateway example, and health benchmarks.
 
@@ -17,6 +19,10 @@ Netplane has not been released. Version and workspace manifests remain at `0.0.0
 - External-consumer API tests for the core crate and optional HTTP adapter, plus benchmark compilation in CI on Rust 1.88.
 
 ### Changed
+
+- Stage submission retains one validated revision/publication snapshot and reobserves the previous stage after stale authorization. Eligibility and configuration restarts respect the rollout polling interval.
+
+- Rollout cancellation preserves committed desired state; terminal decisions validate revision and publication atomically. Administrative halts persist across updates, eligibility resets retain the stage deadline, and first-stage exposure cannot decrease. HTTP rollout observations now exercise latency conditions.
 
 - `netplane-control` reconciliation status initialization makes `Reconciler::new()`
   an ordinary function instead of a `const fn`; construct reconcilers at runtime.
