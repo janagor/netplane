@@ -6,6 +6,9 @@ Netplane has not been released. Version and workspace manifests remain at `0.0.0
 
 ### Added
 
+- Optional per-instance health registry, generation-safe observations, passive Tower middleware, and bounded active probes.
+- Health-aware weighted and discovered-endpoint routing with typed unavailability, HTTP classification, a gateway example, and health benchmarks.
+
 - Criterion benchmarks for direct and bounded Tower execution, Netplane execution, concurrency, routing, admission, publication and selected lifecycle operations.
 - Concurrent caller benchmarks for both single-task batched in-flight work and independently scheduled multi-task callers.
 - Tower double-buffered router baseline, route-label lookup isolation and a yield-once serial execution path.

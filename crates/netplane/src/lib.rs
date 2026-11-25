@@ -21,6 +21,7 @@ pub use controller::{
 };
 mod graph;
 mod handle;
+pub mod health;
 pub use endpoint::Endpoint;
 mod lifecycle;
 mod observability;
@@ -33,7 +34,10 @@ pub use graph::{
 use lifecycle::Admission;
 pub use lifecycle::{AdmissionError, DrainError, LifecycleState, RuntimeStatus};
 use observability::{trace_publication, trace_publish_rejection};
-pub use routing::{WeightedRouting, WeightedRoutingError};
+pub use routing::{
+    HealthAwareRouting, HealthRoutingConfigError, RoutingError, WeightedRouting,
+    WeightedRoutingError,
+};
 use thiserror::Error;
 use tower::{BoxError, Service};
 

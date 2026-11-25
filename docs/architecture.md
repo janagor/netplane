@@ -70,11 +70,16 @@ reused IP; a removed endpoint's old pool remains usable by accepted requests and
 bounded rollback history. Idle pools expire after 30 seconds and retain at most eight
 connections per destination. `UpstreamLimits::max_backends` bounds workers per
 candidate; runtime-wide admission and each backend's concurrency/queue capacity still
-apply. Applications must bound HTTP request bodies at ingress. No retry, active
-health check or Kubernetes API call occurs during request execution. Applications
+apply. Applications must bound HTTP request bodies at ingress. No retry or Kubernetes API call occurs during request execution. Optional health
+observations and separately budgeted active checks follow the
+[health contract](architecture/health.md). Applications
 cancel discovery and its integration alongside runtime shutdown and await their
 caller-owned tasks, as shown in `discovered_gateway`. A retained graph cannot ensure
 a physically terminated Pod remains reachable.
+
+Health-aware routing composes live per-instance handles with immutable policy
+membership. Passive Tower layers and optional bounded active probes update a shared
+state machine without publication. See [backend health](architecture/health.md).
 
 ## Current limits and future work
 
@@ -89,3 +94,5 @@ A positive runtime admission limit bounds accepted, unfinished requests across a
 - [ADR 0005: Reconfiguration control](adr/0005-reconfiguration-control.md)
 
 Inherited tooling ADRs in `docs/adr/tooling/` are not Netplane runtime design decisions.
+
+- [ADR 0006: Backend health](adr/0006-backend-health.md)

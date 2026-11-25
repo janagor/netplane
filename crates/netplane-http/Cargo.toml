@@ -19,6 +19,11 @@ name = "upstream_gateway"
 path = "examples/upstream_gateway/main.rs"
 test = true
 
+[[example]]
+name = "health_aware_gateway"
+path = "examples/health_aware_gateway/main.rs"
+test = true
+
 [lints]
 workspace = true
 

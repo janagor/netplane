@@ -4,6 +4,9 @@ use std::collections::HashSet;
 
 use thiserror::Error;
 
+mod health;
+pub use health::{HealthAwareRouting, HealthRoutingConfigError};
+
 /// A named backend and its configured percentage of sticky-key buckets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct WeightedTarget {
@@ -168,5 +171,94 @@ impl UniformRouting {
         // The remainder is below the usize target count, including on 32-bit hosts.
         let index = usize::try_from(hash_key(key) % self.targets.len() as u64).unwrap_or(0);
         &self.targets[index]
+    }
+}
+
+/// A routing decision has no selectable destination in its pinned graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+pub enum RoutingError {
+    /// Every candidate is ineligible or has zero configured weight.
+    #[error("no eligible backends")]
+    NoEligibleBackends,
+}
+
+impl WeightedRouting {
+    /// Filter positive weights using one eligibility observation per candidate.
+    ///
+    /// Configured weights remain unchanged. Selection redistributes buckets in
+    /// proportion to eligible weights and matches `select` when all are eligible.
+    /// The predicate must include discovery constraints when applicable. The
+    /// local mask fixes the observations for this decision; concurrent health
+    /// changes affect later decisions and never reroute dispatched requests.
+    ///
+    /// # Errors
+    /// Returns [`RoutingError::NoEligibleBackends`] when no positive weight remains.
+    pub fn select_eligible(
+        &self,
+        key: &[u8],
+        mut eligible: impl FnMut(&str) -> bool,
+    ) -> Result<&str, RoutingError> {
+        // Positive integer percentages summing to 100 imply at most 100 positive
+        // targets. A stack mask avoids allocation even with many zero targets.
+        let mut mask = 0_u128;
+        let mut total = 0_u64;
+        for (index, target) in self.targets.iter().filter(|t| t.weight > 0).enumerate() {
+            if eligible(&target.name) {
+                mask |= 1_u128 << index;
+                total += u64::from(target.weight);
+            }
+        }
+        if total == 0 {
+            tracing::debug!(target: "netplane", event = "no_eligible_backends");
+            return Err(RoutingError::NoEligibleBackends);
+        }
+        let mut bucket = hash_key(key) % total;
+        for (index, target) in self.targets.iter().filter(|t| t.weight > 0).enumerate() {
+            if mask & (1_u128 << index) == 0 {
+                continue;
+            }
+            if bucket < u64::from(target.weight) {
+                return Ok(&target.name);
+            }
+            bucket -= u64::from(target.weight);
+        }
+        Err(RoutingError::NoEligibleBackends)
+    }
+}
+
+impl UniformRouting {
+    /// Select uniformly from one sampled eligibility mask, leaving membership intact.
+    ///
+    /// # Errors
+    /// Returns [`RoutingError::NoEligibleBackends`] when every target is excluded.
+    pub fn select_eligible(
+        &self,
+        key: &[u8],
+        mut eligible: impl FnMut(&str) -> bool,
+    ) -> Result<&str, RoutingError> {
+        let mut local = [false; 128];
+        let mut large;
+        let mask = if self.targets.len() <= local.len() {
+            &mut local[..self.targets.len()]
+        } else {
+            large = vec![false; self.targets.len()];
+            large.as_mut_slice()
+        };
+        for (name, value) in self.targets.iter().zip(mask.iter_mut()) {
+            *value = eligible(name);
+        }
+        let total = mask.iter().filter(|&&value| value).count();
+        if total == 0 {
+            tracing::debug!(target: "netplane", event = "no_eligible_backends");
+            return Err(RoutingError::NoEligibleBackends);
+        }
+        let selected = usize::try_from(hash_key(key) % total as u64).unwrap_or(0);
+        self.targets
+            .iter()
+            .zip(mask.iter())
+            .filter(|(_, eligible)| **eligible)
+            .nth(selected)
+            .map(|(name, _)| name.as_str())
+            .ok_or(RoutingError::NoEligibleBackends)
     }
 }

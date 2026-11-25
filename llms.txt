@@ -15,6 +15,7 @@
 - Optional netplane-http adapter with bounded body ingress and live listener reconfiguration.
 - Optional netplane-control typed desired-state reconciliation with single-flight preparation and explicit publication conflicts.
 - Optional netplane-kubernetes namespace-scoped Service and EndpointSlice discovery with immutable snapshots.
+- Optional per-instance backend health, passive Tower observations, bounded active probes, and health-aware routing without graph republication.
 
 ## Limits and planned work
 

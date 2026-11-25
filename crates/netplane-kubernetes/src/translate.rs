@@ -24,6 +24,26 @@ pub struct EndpointId {
     pub target_uid: Option<String>,
 }
 
+impl EndpointId {
+    /// Instance health identity independent of slices, routing weights and versions.
+    ///
+    /// Service and Pod UIDs distinguish known replacements at a reused address.
+    /// Without a target UID, replacement at the same address cannot be detected
+    /// until discovery supplies a different identity.
+    #[must_use]
+    pub fn health_identity(&self) -> netplane::health::BackendIdentity {
+        netplane::health::BackendIdentity {
+            service: format!("{}/{}", self.service.key.namespace, self.service.key.name),
+            instance: self.address.to_string(),
+            incarnation: format!(
+                "{}:{}",
+                self.service.uid.as_deref().unwrap_or("unknown-service"),
+                self.target_uid.as_deref().unwrap_or("unknown-target")
+            ),
+        }
+    }
+}
+
 /// Configuration for a bounded backend, without live execution resources.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiscoveredBackend {

@@ -117,7 +117,7 @@ where
             handle,
             decode: Arc::new(decode),
             encode: Arc::new(encode),
-            map_error: Arc::new(|_| empty(StatusCode::INTERNAL_SERVER_ERROR)),
+            map_error: Arc::new(default_error),
             limits,
             ingress: Arc::new(Semaphore::new(limits.max_concurrent_body_reads)),
         })
@@ -240,9 +240,22 @@ fn empty(status: StatusCode) -> Response<Bytes> {
     response
 }
 
+fn default_error(error: &BoxError) -> Response<Bytes> {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error.as_ref());
+    while let Some(source) = current {
+        if source.is::<netplane::routing::RoutingError>() {
+            return empty(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        current = source.source();
+    }
+    empty(StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 fn body_response(response: Response<Bytes>) -> Response<Body> {
     response.map(Body::from)
 }
 
 /// Bounded outbound HTTP forwarding, independent of discovery.
 pub mod upstream;
+
+pub mod health;

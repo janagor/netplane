@@ -13,6 +13,7 @@ SOURCES=(
     CONTRIBUTING.md
     docs/architecture.md
     docs/architecture/execution-semantics.md
+    docs/architecture/health.md
     docs/control-plane.md
     docs/control-plane-observability.md
     docs/http-boundaries.md
@@ -21,6 +22,7 @@ SOURCES=(
     docs/adr/0003-crate-boundaries.md
     docs/adr/0004-graph-composition.md
     docs/adr/0005-reconfiguration-control.md
+    docs/adr/0006-backend-health.md
     QUICKSTART.md
     SECURITY.md
 )
@@ -50,6 +52,7 @@ cat > "${LLMS_FILE}" << OVERVIEW
 - Optional netplane-http adapter with bounded body ingress and live listener reconfiguration.
 - Optional netplane-control typed desired-state reconciliation with single-flight preparation and explicit publication conflicts.
 - Optional netplane-kubernetes namespace-scoped Service and EndpointSlice discovery with immutable snapshots.
+- Optional per-instance backend health, passive Tower observations, bounded active probes, and health-aware routing without graph republication.
 
 ## Limits and planned work
 

@@ -1,4 +1,5 @@
 mod hardening;
+mod health;
 mod integration;
 mod lifecycle;
 mod observations;

@@ -9,7 +9,7 @@ use std::{
 use thiserror::Error;
 use tower::{BoxError, Service, ServiceExt, service_fn, util::BoxService};
 
-use crate::{Capacity, ConfigError, Endpoint, ExecutionGraph, GraphVersion};
+use crate::{Capacity, ConfigError, Endpoint, ExecutionGraph, GraphVersion, RoutingError};
 
 mod metadata;
 mod validation;
@@ -53,7 +53,7 @@ pub enum GraphBuildError {
 
 struct Router<Request> {
     name: String,
-    selector: Box<dyn Fn(&Request) -> Cow<'static, str> + Send + Sync>,
+    selector: Box<dyn Fn(&Request) -> Result<Cow<'static, str>, RoutingError> + Send + Sync>,
     routes: BTreeMap<String, String>,
     fallback: Option<String>,
 }
@@ -173,9 +173,23 @@ impl<Request, Response> GraphBuilder<Request, Response> {
     /// The selector's output is matched against declared labels. Unknown labels
     /// use the explicit fallback. Selection is synchronous at dispatch or admission.
     #[must_use]
-    pub fn router<F, L>(mut self, name: impl Into<String>, selector: F) -> Self
+    pub fn router<F, L>(self, name: impl Into<String>, selector: F) -> Self
     where
         F: Fn(&Request) -> L + Send + Sync + 'static,
+        L: Into<Cow<'static, str>>,
+    {
+        self.try_router(name, move |request| Ok(selector(request)))
+    }
+
+    /// Register a selector whose failure prevents dispatch, including fallback.
+    ///
+    /// A selection error is returned unchanged as a boxed routing error. Unknown
+    /// successful labels still use the explicit fallback. Both execution modes
+    /// select lazily within the request's pinned graph version.
+    #[must_use]
+    pub fn try_router<F, L>(mut self, name: impl Into<String>, selector: F) -> Self
+    where
+        F: Fn(&Request) -> Result<L, RoutingError> + Send + Sync + 'static,
         L: Into<Cow<'static, str>>,
     {
         let name = name.into();
@@ -192,7 +206,7 @@ impl<Request, Response> GraphBuilder<Request, Response> {
         } else {
             self.router = Some(Router {
                 name,
-                selector: Box::new(move |request| selector(request).into()),
+                selector: Box::new(move |request| selector(request).map(Into::into)),
                 routes: BTreeMap::new(),
                 fallback: None,
             });
@@ -390,12 +404,16 @@ where
         } else {
             let selector = router.selector;
             let root = service_fn(move |request: Request| {
-                let label = selector(&request);
-                let endpoint = resolved_routes
-                    .get(label.as_ref())
-                    .unwrap_or(&fallback_endpoint)
-                    .clone();
-                async move { endpoint.execute(request).await }
+                let selected = selector(&request).map(|label| {
+                    resolved_routes
+                        .get(label.as_ref())
+                        .unwrap_or(&fallback_endpoint)
+                        .clone()
+                });
+                async move {
+                    let endpoint = selected?;
+                    endpoint.execute(request).await
+                }
             });
             let endpoint = Endpoint::new(root, self.capacity)?;
             endpoint_ids.push(endpoint.id());

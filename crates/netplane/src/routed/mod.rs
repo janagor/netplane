@@ -12,9 +12,10 @@ use std::{
 use pin_project_lite::pin_project;
 use tower::BoxError;
 
-use crate::{Endpoint, endpoint::EndpointExecution};
+use crate::{Endpoint, RoutingError, endpoint::EndpointExecution};
 
-type Selector<Request> = Arc<dyn Fn(&Request) -> Cow<'static, str> + Send + Sync>;
+type Selector<Request> =
+    Arc<dyn Fn(&Request) -> Result<Cow<'static, str>, RoutingError> + Send + Sync>;
 
 /// Immutable router with no aggregate per-version execution capacity.
 pub struct RoutedGraph<Request: Send, Response> {
@@ -29,7 +30,7 @@ where
     Response: Send + 'static,
 {
     pub(crate) fn new(
-        selector: Box<dyn Fn(&Request) -> Cow<'static, str> + Send + Sync>,
+        selector: Box<dyn Fn(&Request) -> Result<Cow<'static, str>, RoutingError> + Send + Sync>,
         routes: BTreeMap<String, Endpoint<Request, Response>>,
         fallback: Endpoint<Request, Response>,
     ) -> Self {
@@ -113,7 +114,13 @@ where
                         this.phase.set(RoutedPhase::Done);
                         break Poll::Ready(Err("routed request missing".into()));
                     };
-                    let label = selector(&request);
+                    let label = match selector(&request) {
+                        Ok(label) => label,
+                        Err(error) => {
+                            this.phase.set(RoutedPhase::Done);
+                            break Poll::Ready(Err(error.into()));
+                        }
+                    };
                     let endpoint = routes.get(label.as_ref()).unwrap_or(fallback).clone();
                     let execution = endpoint.execute_owned(request);
                     this.phase.set(RoutedPhase::Execute { execution });

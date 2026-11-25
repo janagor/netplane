@@ -1,4 +1,6 @@
 //! Cluster-independent HTTP publication and lifetime tests.
+#[path = "reconciliation/health.rs"]
+mod health;
 mod support;
 use bytes::Bytes;
 use netplane_control::{ApplyOutcome, GraphPreparer};

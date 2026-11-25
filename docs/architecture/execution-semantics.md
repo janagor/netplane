@@ -39,3 +39,10 @@ The runtime emits [structured tracing events](../observability.md) for admission
 `version.released` means a publication wrapper lost its last owner. A rollback can make two publication IDs share one executable graph, so this event alone does not prove that its Tower workers were destroyed. Arbitrary graph construction and policy validation remain future work.
 
 For buffering, admission timing, response ownership, and listener shutdown at the HTTP boundary, see [HTTP resource boundaries](../http-boundaries.md).
+
+## Health eligibility
+
+Optional [backend health](health.md) is sampled when lazy route selection runs
+inside the pinned graph. Selection failures dispatch no backend or fallback.
+Once selected, a destination is retained across health changes, publication and
+queue waits. Health updates never retry, reroute, or publish a graph.

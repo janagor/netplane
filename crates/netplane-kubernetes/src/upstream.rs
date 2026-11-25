@@ -1,11 +1,15 @@
 use crate::{DesiredState, EndpointSelection};
 use bytes::Bytes;
 use http::{Request, Response, StatusCode};
+use netplane::health::{
+    HealthHandle, HealthLayer, HealthMode, HealthPolicy, HealthRegistry, HealthSchedulerHandle,
+};
 use netplane::{Capacity, GraphBuilder, GraphDraft, GraphVersion, routing::UniformRouting};
 use netplane_control::GraphPreparer;
+use netplane_http::health::{HttpHealthProbe, HttpOutcomeClassifier};
 use netplane_http::upstream::{self, HttpUpstream};
 use std::{sync::Arc, time::Duration};
-use tower::{BoxError, service_fn};
+use tower::{BoxError, Layer, service_fn};
 
 /// Transport and preparation bounds; global admission is configured on `Netplane`.
 #[derive(Clone, Debug)]
@@ -48,6 +52,12 @@ pub enum PreparationError {
     /// Immutable routing policy validation failed.
     #[error(transparent)]
     Routing(#[from] netplane::routing::UniformRoutingError),
+    /// Health identity or configuration conflicts with a live registration.
+    #[error(transparent)]
+    Health(#[from] netplane::health::HealthError),
+    /// Probe registration exceeds scheduler bounds or the scheduler has stopped.
+    #[error(transparent)]
+    Probe(#[from] netplane::health::ProbeError),
 }
 
 /// No eligible Kubernetes destination exists in the selected version.
@@ -67,6 +77,10 @@ pub struct Unavailable;
 pub struct HttpGraphPreparer {
     limits: UpstreamLimits,
     key: Arc<dyn for<'a> Fn(&'a Request<Bytes>) -> &'a [u8] + Send + Sync>,
+    health: Option<(HealthRegistry, HealthPolicy)>,
+    active_checks: Option<(HealthSchedulerHandle, String)>,
+    health_classifier: HttpOutcomeClassifier,
+    probe_classifier: HttpOutcomeClassifier,
 }
 impl HttpGraphPreparer {
     /// Select by caller-supplied stable key bytes using `EndpointSelection::UniformHash`.
@@ -81,7 +95,76 @@ impl HttpGraphPreparer {
         Self {
             limits,
             key: Arc::new(key),
+            health: None,
+            active_checks: None,
+            health_classifier: HttpOutcomeClassifier::passive_default(),
+            probe_classifier: HttpOutcomeClassifier::probe_default(),
         }
+    }
+
+    /// Observe upstream outcomes and filter local health at each route selection.
+    ///
+    /// Unchanged endpoint identities and compatible policies reuse live records
+    /// across candidate preparation, publication and rollback. Kubernetes readiness
+    /// remains a membership constraint; local recovery cannot add removed endpoints.
+    #[must_use]
+    pub fn with_health(mut self, registry: HealthRegistry, policy: HealthPolicy) -> Self {
+        self.health = Some((registry, policy));
+        self.active_checks = None;
+        self
+    }
+
+    /// Probe discovered backends before admitting ordinary traffic.
+    ///
+    /// The caller runs and shuts down the shared scheduler. Registrations belong
+    /// to executable graph workers; retained versions share registrations, and
+    /// rejecting or dropping a candidate cannot cancel an active graph's checks.
+    /// Invalid origin-form paths are rejected during preparation.
+    #[must_use]
+    pub fn with_active_health(
+        mut self,
+        registry: HealthRegistry,
+        policy: HealthPolicy,
+        scheduler: HealthSchedulerHandle,
+        path: impl Into<String>,
+    ) -> Self {
+        self.health = Some((registry, policy));
+        self.active_checks = Some((scheduler, path.into()));
+        self
+    }
+
+    /// Customize HTTP status outcomes for passive observations and active checks.
+    #[must_use]
+    pub fn with_health_classifier(mut self, classifier: HttpOutcomeClassifier) -> Self {
+        self.probe_classifier = classifier.clone();
+        self.health_classifier = classifier;
+        self
+    }
+
+    fn health_handles(
+        &self,
+        desired: &DesiredState,
+    ) -> Result<Vec<Option<HealthHandle>>, netplane::health::HealthError> {
+        desired
+            .backends()
+            .iter()
+            .map(|backend| {
+                self.health
+                    .as_ref()
+                    .map(|(registry, policy)| {
+                        registry.register_with_mode(
+                            backend.id.health_identity(),
+                            policy.clone(),
+                            if self.active_checks.is_some() {
+                                HealthMode::Active
+                            } else {
+                                HealthMode::Passive
+                            },
+                        )
+                    })
+                    .transpose()
+            })
+            .collect()
     }
 }
 impl GraphPreparer<DesiredState, Request<Bytes>, Response<Bytes>> for HttpGraphPreparer {
@@ -118,35 +201,74 @@ impl GraphPreparer<DesiredState, Request<Bytes>, Response<Bytes>> for HttpGraphP
             EndpointSelection::UniformHash => UniformRouting::try_new(names.clone())?,
         };
         let key = Arc::clone(&self.key);
+        let handles = self.health_handles(&desired)?;
+        let eligibility = handles.clone();
+        let health_enabled = self.health.is_some();
         let mut builder = GraphBuilder::new()
-            .router("endpoints", move |request: &Request<Bytes>| {
-                policy.select(key(request)).to_owned()
+            .try_router("endpoints", move |request: &Request<Bytes>| {
+                if !health_enabled {
+                    return Ok(policy.select(key(request)).to_owned());
+                }
+                let mut handles = eligibility.iter();
+                policy
+                    .select_eligible(key(request), |_| {
+                        handles
+                            .next()
+                            .and_then(Option::as_ref)
+                            .is_none_or(HealthHandle::is_eligible)
+                    })
+                    .map(str::to_owned)
             })
             .entry("endpoints")
             .without_outer_capacity()
             .fallback("endpoints", names[0].clone());
         let client = upstream::client(self.limits.exchange_timeout)
             .map_err(|error| PreparationError::Transport(Box::new(error)))?;
-        for (backend, name) in desired.backends().iter().zip(names) {
+        for ((backend, name), health) in desired.backends().iter().zip(names).zip(handles) {
             let upstream = HttpUpstream::new(
                 client.clone(),
                 &format!("http://{}", backend.id.address),
                 self.limits.max_response_bytes,
             )
             .map_err(PreparationError::Transport)?;
-            builder = builder
-                .service_with_capacity(
+            let registration = match (&self.active_checks, &health) {
+                (Some((scheduler, path)), Some(health)) => Some(
+                    scheduler.register(
+                        health.clone(),
+                        HttpHealthProbe::new(upstream.clone(), path)
+                            .map_err(PreparationError::Transport)?
+                            .with_classifier(self.probe_classifier.clone())
+                            .with_transport_key(format!(
+                                "netplane-http-client-v1:{:?}",
+                                self.limits.exchange_timeout
+                            )),
+                    )?,
+                ),
+                _ => None,
+            };
+            let service = service_fn(move |request| {
+                let upstream = upstream.clone();
+                let registration = registration.clone();
+                async move {
+                    let response = upstream.execute(request).await;
+                    drop(registration);
+                    response
+                }
+            });
+            let capacity = Capacity {
+                max_in_flight: backend.capacity.get(),
+                buffer_capacity: backend.capacity.get(),
+            };
+            builder = if let Some(health) = health {
+                builder.service_with_capacity(
                     name.clone(),
-                    service_fn(move |request| {
-                        let upstream = upstream.clone();
-                        async move { upstream.execute(request).await }
-                    }),
-                    Capacity {
-                        max_in_flight: backend.capacity.get(),
-                        buffer_capacity: backend.capacity.get(),
-                    },
+                    HealthLayer::new(health, self.health_classifier.clone()).layer(service),
+                    capacity,
                 )
-                .route("endpoints", name.clone(), name);
+            } else {
+                builder.service_with_capacity(name.clone(), service, capacity)
+            }
+            .route("endpoints", name.clone(), name);
         }
         Ok(builder.validate()?)
     }

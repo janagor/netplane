@@ -57,6 +57,7 @@ pub struct HttpUpstream {
     client: reqwest::Client,
     origin: url::Url,
     max_response_bytes: usize,
+    probe_transport: std::sync::Arc<()>,
 }
 
 impl HttpUpstream {
@@ -85,7 +86,19 @@ impl HttpUpstream {
             client,
             origin,
             max_response_bytes,
+            probe_transport: std::sync::Arc::new(()),
         })
+    }
+
+    pub(crate) fn probe_configuration(&self) -> (&str, usize, String) {
+        (
+            self.origin.as_str(),
+            self.max_response_bytes,
+            format!(
+                "opaque-client:{:p}",
+                std::sync::Arc::as_ptr(&self.probe_transport)
+            ),
+        )
     }
 
     /// Forward an origin-form request and collect its bounded response.
@@ -172,6 +185,10 @@ pub fn map_error(error: &BoxError) -> Response<Bytes> {
     let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error.as_ref());
     let mut status = StatusCode::BAD_GATEWAY;
     while let Some(error) = current {
+        if error.is::<netplane::routing::RoutingError>() {
+            status = StatusCode::SERVICE_UNAVAILABLE;
+            break;
+        }
         if let Some(upstream) = error.downcast_ref::<UpstreamError>() {
             status = match upstream {
                 UpstreamError::Timeout => StatusCode::GATEWAY_TIMEOUT,

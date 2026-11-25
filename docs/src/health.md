@@ -1,0 +1,1 @@
+{{#include ../architecture/health.md}}

@@ -11,5 +11,10 @@ The canonical [architecture contract](https://github.com/janagor/netplane/blob/m
 - [ADR 0003: Crate boundaries](https://github.com/janagor/netplane/blob/main/docs/adr/0003-crate-boundaries.md)
 - [ADR 0004: Graph composition](https://github.com/janagor/netplane/blob/main/docs/adr/0004-graph-composition.md)
 - [ADR 0005: Reconfiguration control](https://github.com/janagor/netplane/blob/main/docs/adr/0005-reconfiguration-control.md)
+- [ADR 0006: Backend health](https://github.com/janagor/netplane/blob/main/docs/adr/0006-backend-health.md)
 
 The workspace has `crates/netplane` for the transport-independent runtime, `crates/netplane-http` for the optional HTTP adapter, `crates/netplane-control` for optional typed reconciliation and bounded update scheduling, and `crates/xtask` for development automation.
+
+Optional [backend health](health.md) filters immutable routing membership using live
+per-instance records. Passive observations and separately bounded active probes
+never publish graphs or move selected requests.
