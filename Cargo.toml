@@ -85,7 +85,7 @@ cognitive_complexity = "allow"
 # ─── Workspace-wide dependency versions ───────────────────────────────────────
 [workspace.dependencies]
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
-kube = { version = "~4.0.0", default-features = false, features = ["client", "runtime", "rustls-tls", "ring"] }
+kube = { version = "~4.2.0", default-features = false, features = ["client", "runtime", "rustls-tls", "ring"] }
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 criterion = { version = "0.5.1", features = ["async_tokio"] }
